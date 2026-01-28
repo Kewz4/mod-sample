@@ -5,11 +5,6 @@ plugins {
 neoForge {
     version = project.neoforge_version
 
-    parchment {
-        minecraftVersion = "1.21.1"
-        mappingsVersion = "2024.08.11"
-    }
-
     mods {
         punchy {
             sourceSet project.sourceSets.main
