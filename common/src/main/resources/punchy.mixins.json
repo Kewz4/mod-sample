@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "com.punchy.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "MixinTitleScreen"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

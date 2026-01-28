@@ -1,0 +1,20 @@
+modLoader="javafml"
+loaderVersion="[40,)"
+license="MIT"
+issueTrackerURL="https://github.com/example/punchy/issues"
+
+[[mods]]
+modId="punchy"
+version="${file.jarVersion}"
+displayName="Punchy"
+displayURL="https://example.com/"
+logoFile="logo.png"
+authors="Me"
+description="Punchy FPA Mod"
+
+[[dependencies.punchy]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1,)"
+ordering="NONE"
+side="BOTH"

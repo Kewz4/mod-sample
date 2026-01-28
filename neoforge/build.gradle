@@ -1,0 +1,34 @@
+plugins {
+    id 'net.neoforged.moddev' version '2.0.26-beta' // Using a newer version for 1.21.1
+}
+
+neoForge {
+    version = project.neoforge_version
+
+    parchment {
+        minecraftVersion = "1.21.1"
+        mappingsVersion = "2024.08.11"
+    }
+
+    mods {
+        punchy {
+            sourceSet project.sourceSets.main
+        }
+    }
+
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+    }
+}
+
+dependencies {
+    implementation project(':common')
+}
