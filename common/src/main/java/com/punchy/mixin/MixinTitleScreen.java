@@ -1,6 +1,7 @@
 package com.punchy.mixin;
 
 import com.punchy.UpdateChecker;
+import com.punchy.client.UpdateToast;
 import net.minecraft.Util;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.components.Button;
@@ -22,8 +23,6 @@ public class MixinTitleScreen extends net.minecraft.client.gui.screens.Screen {
 
     @Inject(method = "init", at = @At("RETURN"))
     private void onInit(CallbackInfo ci) {
-        // Trigger update check if not started (safe to call multiple times as it has internal flag)
-        // We attempt to detect loader via reflection for this common mixin
         String loader = "forge";
         if (isClassPresent("net.fabricmc.loader.api.FabricLoader")) {
             loader = "fabric";
@@ -33,6 +32,7 @@ public class MixinTitleScreen extends net.minecraft.client.gui.screens.Screen {
         UpdateChecker.checkForUpdates(loader);
 
         if (UpdateChecker.updateAvailable) {
+             // Add persistent button
              int btnWidth = 140;
              int btnHeight = 20;
              int x = this.width - btnWidth - 5;
@@ -48,6 +48,12 @@ public class MixinTitleScreen extends net.minecraft.client.gui.screens.Screen {
              .bounds(x, y, btnWidth, btnHeight)
              .tooltip(Tooltip.create(Component.literal("New version: " + UpdateChecker.latestVersion + "\nClick to download.")))
              .build());
+
+             // Show Toast if not already shown
+             if (!UpdateChecker.popupShown) {
+                 UpdateChecker.popupShown = true;
+                 this.minecraft.getToasts().addToast(new UpdateToast(UpdateChecker.latestVersion));
+             }
         }
     }
 

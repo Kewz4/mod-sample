@@ -27,3 +27,7 @@ neoForge {
 dependencies {
     implementation project(':common')
 }
+
+tasks.named('jar', Jar) {
+    from project(':common').sourceSets.main.output
+}
