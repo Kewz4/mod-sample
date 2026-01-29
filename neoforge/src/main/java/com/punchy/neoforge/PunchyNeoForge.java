@@ -7,7 +7,6 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
-import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.fml.ModLoadingContext;
 
 @Mod("punchy")
@@ -18,6 +17,7 @@ public class PunchyNeoForge {
 
         ModLoadingContext.get().registerExtensionPoint(IConfigScreenFactory.class, () -> (client, parent) -> new PunchyConfigScreen(parent));
 
-        NeoForge.EVENT_BUS.register(this);
+        // Removed NeoForge.EVENT_BUS.register(this) as we have no @SubscribeEvent methods currently.
+        // Screen init logic is handled via MixinTitleScreen in common.
     }
 }

@@ -13,8 +13,15 @@ authors="Me"
 description="Punchy FPA Mod"
 
 [[dependencies.punchy]]
+modId="forge"
+mandatory=true
+versionRange="[52,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.punchy]]
 modId="minecraft"
-type="required"
+mandatory=true
 versionRange="[1.21.1,)"
 ordering="NONE"
 side="BOTH"
