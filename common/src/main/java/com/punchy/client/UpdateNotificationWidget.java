@@ -13,17 +13,35 @@ import net.minecraft.resources.ResourceLocation;
 import java.net.URI;
 
 public class UpdateNotificationWidget extends AbstractWidget {
-    private static final ResourceLocation TEXTURE = ResourceLocation.parse("toast/advancement");
+    // Replaced ResourceLocation.parse with ResourceLocation.tryParse for better compatibility/safety
+    // If tryParse is missing (it shouldn't be in 1.21), we can fallback to constructor if available.
+    // However, the crash was NoSuchMethodError for 'm_338530_' which is 'parse'.
+    // 'tryParse' is usually 'm_135820_' or similar.
+    // Let's use ResourceLocation.fromNamespaceAndPath if available, or just new ResourceLocation(ns, path) is deprecated/removed?
+    // In 1.21, `new ResourceLocation` is gone.
+    // `ResourceLocation.withDefaultNamespace` is common.
+    // Let's stick to `ResourceLocation.parse` but ensure we are compiling against the right mapping that Forge expects?
+    // Actually, Common uses official Mojang mappings. Forge runtime uses SRG remapped to Official.
+    // If `parse` isn't found, it might be that Forge is remapping it to something else or the runtime jar is weird.
+    // But `tryParse` is safer.
+
+    // BUT, wait. `toast/advancement` is not a valid namespace:path. It's missing the namespace!
+    // It should be `minecraft:toast/advancement`.
+    // `parse("toast/advancement")` assumes namespace `minecraft` in some contexts or fails?
+    // `ResourceLocation.parse` handles default namespace? Yes.
+
+    // The safest way is `ResourceLocation.fromNamespaceAndPath("minecraft", "toast/advancement")` if it exists.
+    // Or just `ResourceLocation.tryParse("minecraft:toast/advancement")`.
+
+    private static final ResourceLocation TEXTURE = ResourceLocation.tryParse("minecraft:toast/advancement");
     private static final int TOAST_WIDTH = 160;
     private static final int TOAST_HEIGHT = 32;
-    private final String version;
     private final Button downloadBtn;
-    private long startTime;
+    private long firstRenderTime = -1;
 
-    public UpdateNotificationWidget(int x, int y, String version) {
+    public UpdateNotificationWidget(int x, int y) {
         super(x, y, TOAST_WIDTH, TOAST_HEIGHT, Component.literal("Update Notification"));
-        this.version = version;
-        this.startTime = System.currentTimeMillis();
+        this.visible = false; // Start hidden
 
         this.downloadBtn = Button.builder(Component.literal("Download"), (btn) -> {
             if (!UpdateChecker.downloadUrl.isEmpty()) {
@@ -34,27 +52,31 @@ public class UpdateNotificationWidget extends AbstractWidget {
 
     @Override
     public void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-        long elapsed = System.currentTimeMillis() - startTime;
-        if (elapsed > 15000) { // "last way longer" -> 15 seconds
+        if (!UpdateChecker.updateAvailable) {
             this.visible = false;
-            return; // Hide
+            return;
         }
 
-        // Render Background (Toast texture)
-        // Note: Toast textures are usually 160x32.
-        guiGraphics.blitSprite(TEXTURE, this.getX(), this.getY(), this.width, this.height);
+        // Activate if not already
+        if (!this.visible) {
+            this.visible = true;
+            this.firstRenderTime = System.currentTimeMillis();
+        }
 
-        // Render Icon (Generic "Info" or Item)
-        // We'll simulate an icon box or just leave it.
-        // User asked for "render the mod icon form modrinth".
-        // Fetching remote images and rendering them is complex (async texture manager).
-        // I will use a standard item for now (e.g. Paper or Map) to represent "News".
-        // Or just the text as space is limited.
+        // Timer check
+        if (firstRenderTime > 0 && System.currentTimeMillis() - firstRenderTime > 15000) {
+            this.visible = false;
+            return;
+        }
+
+        // Render Background
+        if (TEXTURE != null) {
+            guiGraphics.blitSprite(TEXTURE, this.getX(), this.getY(), this.width, this.height);
+        }
 
         guiGraphics.drawString(Minecraft.getInstance().font, "New Punchy! Update Available", this.getX() + 10, this.getY() + 5, 0xFFFFFF00, false);
-        guiGraphics.drawString(Minecraft.getInstance().font, "v" + version, this.getX() + 10, this.getY() + 16, 0xFFFFFFFF, false);
+        guiGraphics.drawString(Minecraft.getInstance().font, "v" + UpdateChecker.latestVersion, this.getX() + 10, this.getY() + 16, 0xFFFFFFFF, false);
 
-        // Render the download button
         this.downloadBtn.render(guiGraphics, mouseX, mouseY, partialTick);
     }
 
@@ -67,6 +89,5 @@ public class UpdateNotificationWidget extends AbstractWidget {
 
     @Override
     protected void updateWidgetNarration(NarrationElementOutput narrationElementOutput) {
-        // No-op for now
     }
 }

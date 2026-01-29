@@ -24,10 +24,14 @@ public class MixinTitleScreen extends net.minecraft.client.gui.screens.Screen {
         }
         UpdateChecker.checkForUpdates(loader);
 
-        if (UpdateChecker.updateAvailable && !UpdateChecker.popupShown) {
-             UpdateChecker.popupShown = true;
-             // Add persistent notification widget
-             this.addRenderableWidget(new com.punchy.client.UpdateNotificationWidget(this.width - 160 - 5, 5, UpdateChecker.latestVersion));
+        if (!UpdateChecker.popupShown) {
+             UpdateChecker.popupShown = true; // Mark as "attempted to show" to prevent duplicates on resize?
+             // Actually, we want it to show on every TitleScreen visit if the timer hasn't expired?
+             // Or just once per session?
+             // The widget handles its own visibility.
+             // We just add it.
+
+             this.addRenderableWidget(new com.punchy.client.UpdateNotificationWidget(this.width - 160 - 5, 5));
         }
     }
 
