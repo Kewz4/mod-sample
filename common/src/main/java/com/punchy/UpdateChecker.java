@@ -11,14 +11,19 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 
 public class UpdateChecker {
-    public static final String MOD_VERSION = "2.1";
+    public static final String MOD_VERSION = "2.1"; // Hardcoded older version for demo
     public static final String PROJECT_ID = "punchy-fpa";
     public static boolean updateAvailable = false;
     public static boolean popupShown = false;
     public static String downloadUrl = "";
     public static String latestVersion = "";
 
+    private static boolean checkStarted = false;
+
     public static void checkForUpdates(String loader) {
+        if (checkStarted) return;
+        checkStarted = true;
+
         CompletableFuture.runAsync(() -> {
             try {
                 URL url = new URL("https://api.modrinth.com/v2/project/" + PROJECT_ID + "/version");
@@ -53,14 +58,12 @@ public class UpdateChecker {
 
                         if (gameVersionMatch && loaderMatch) {
                             String verNum = versionObj.get("version_number").getAsString();
-                            // If version is different (and presumably newer since list is sorted by date desc usually), flag update
-                            // The prompt says "if it doesnt match... pop up"
+                            // Compare version. Since demo assumes we are 2.1 and latest is different.
                             if (!verNum.equals(MOD_VERSION)) {
                                 updateAvailable = true;
                                 latestVersion = verNum;
                                 downloadUrl = "https://modrinth.com/mod/punchy-fpa/version/" + versionObj.get("id").getAsString();
                             }
-                            // We found the latest for this loader/game version, so stop searching
                             break;
                         }
                     }
