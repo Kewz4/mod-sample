@@ -24,10 +24,13 @@ neoForge {
     }
 }
 
+sourceSets.main.resources.srcDir project(':common').sourceSets.main.resources.srcDirs
+sourceSets.main.java.srcDir project(':common').sourceSets.main.java.srcDirs
+
 dependencies {
-    implementation project(':common')
+    // implementation project(':common')
 }
 
-tasks.named('jar', Jar) {
-    from project(':common').sourceSets.main.output
-}
+// tasks.named('jar', Jar) {
+//    from project(':common').sourceSets.main.output
+// }

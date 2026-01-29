@@ -24,6 +24,8 @@ public class UpdateChecker {
         if (checkStarted) return;
         checkStarted = true;
 
+        System.out.println("[Punchy] Starting update check for loader: " + loader);
+
         CompletableFuture.runAsync(() -> {
             try {
                 URL url = new URL("https://api.modrinth.com/v2/project/" + PROJECT_ID + "/version");
@@ -31,7 +33,10 @@ public class UpdateChecker {
                 connection.setRequestMethod("GET");
                 connection.setRequestProperty("User-Agent", "PunchyMod/UpdateChecker");
 
-                if (connection.getResponseCode() == 200) {
+                int responseCode = connection.getResponseCode();
+                System.out.println("[Punchy] Modrinth API response: " + responseCode);
+
+                if (responseCode == 200) {
                     InputStreamReader reader = new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8);
                     JsonArray versions = JsonParser.parseReader(reader).getAsJsonArray();
 
@@ -58,17 +63,24 @@ public class UpdateChecker {
 
                         if (gameVersionMatch && loaderMatch) {
                             String verNum = versionObj.get("version_number").getAsString();
-                            // Compare version. Since demo assumes we are 2.1 and latest is different.
+                            System.out.println("[Punchy] Found latest version: " + verNum);
+
                             if (!verNum.equals(MOD_VERSION)) {
                                 updateAvailable = true;
                                 latestVersion = verNum;
                                 downloadUrl = "https://modrinth.com/mod/punchy-fpa/version/" + versionObj.get("id").getAsString();
+                                System.out.println("[Punchy] Update available! URL: " + downloadUrl);
+                            } else {
+                                System.out.println("[Punchy] Mod is up to date.");
                             }
                             break;
                         }
                     }
+                } else {
+                    System.err.println("[Punchy] Failed to check for updates. Response code: " + responseCode);
                 }
             } catch (Exception e) {
+                System.err.println("[Punchy] Error checking for updates:");
                 e.printStackTrace();
             }
         });

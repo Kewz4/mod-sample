@@ -34,9 +34,14 @@ minecraft {
     }
 }
 
+sourceSets.main.resources.srcDir project(':common').sourceSets.main.resources.srcDirs
+sourceSets.main.java.srcDir project(':common').sourceSets.main.java.srcDirs
+
 dependencies {
     minecraft "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
-    implementation project(':common')
+    // implementation project(':common') // Don't depend on the artifact, compile sources directly
+    // We need to declare dependencies of common here if any
+    implementation "com.google.code.gson:gson:2.10.1" // Example
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 }
 
@@ -46,6 +51,6 @@ mixin {
     config "punchy.client.mixins.json"
 }
 
-tasks.named('jar', Jar) {
-    from project(':common').sourceSets.main.output
-}
+// tasks.named('jar', Jar) {
+//    from project(':common').sourceSets.main.output
+// }
