@@ -1,12 +1,19 @@
 package com.punchy.mixin;
 
 import com.punchy.UpdateChecker;
+import net.minecraft.ChatFormatting;
+import net.minecraft.Util;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+import java.net.URI;
 
 @Mixin(TitleScreen.class)
 public class MixinTitleScreen extends net.minecraft.client.gui.screens.Screen {
@@ -24,14 +31,34 @@ public class MixinTitleScreen extends net.minecraft.client.gui.screens.Screen {
         }
         UpdateChecker.checkForUpdates(loader);
 
-        if (!UpdateChecker.popupShown) {
-             UpdateChecker.popupShown = true; // Mark as "attempted to show" to prevent duplicates on resize?
-             // Actually, we want it to show on every TitleScreen visit if the timer hasn't expired?
-             // Or just once per session?
-             // The widget handles its own visibility.
-             // We just add it.
+        if (UpdateChecker.updateAvailable) {
+             // 1. Persistent Button
+             int btnWidth = 140;
+             int btnHeight = 20;
+             int x = this.width - btnWidth - 5;
+             int y = 5;
 
-             this.addRenderableWidget(new com.punchy.client.UpdateNotificationWidget(this.width - 160 - 5, 5));
+             Component text = Component.literal("Update Available!").withStyle(ChatFormatting.RED);
+
+             this.addRenderableWidget(Button.builder(text, (btn) -> {
+                 if (!UpdateChecker.downloadUrl.isEmpty()) {
+                    Util.getPlatform().openUri(URI.create(UpdateChecker.downloadUrl));
+                 }
+             })
+             .bounds(x, y, btnWidth, btnHeight)
+             .tooltip(Tooltip.create(Component.literal("New version: " + UpdateChecker.latestVersion + "\nClick to download.")))
+             .build());
+
+             // 2. System Toast
+             if (!UpdateChecker.popupShown) {
+                 UpdateChecker.popupShown = true;
+                 SystemToast.add(
+                     this.minecraft.getToasts(),
+                     SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+                     Component.literal("Punchy Update Available!"),
+                     Component.literal("Version " + UpdateChecker.latestVersion + " is out.")
+                 );
+             }
         }
     }
 
