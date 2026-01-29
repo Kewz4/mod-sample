@@ -23,7 +23,11 @@
     ]
   },
   "mixins": [
-    "punchy.mixins.json"
+    "punchy.mixins.json",
+    {
+      "config": "punchy.client.mixins.json",
+      "environment": "client"
+    }
   ],
   "depends": {
     "fabricloader": ">=0.16.9",

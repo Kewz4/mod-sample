@@ -10,7 +10,7 @@ dependencies {
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
     // ModMenu
-    modImplementation "com.terraformersmc:modmenu:11.0.1" // Check version later, 11.0.1 is for 1.21
+    modImplementation "com.terraformersmc:modmenu:11.0.3"
 
     implementation project(path: ':common', configuration: 'namedElements')
     include project(':common')

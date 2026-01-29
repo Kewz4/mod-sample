@@ -43,6 +43,7 @@ dependencies {
 mixin {
     add sourceSets.main, "punchy.refmap.json"
     config "punchy.mixins.json"
+    config "punchy.client.mixins.json"
 }
 
 tasks.named('jar', Jar) {
