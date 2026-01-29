@@ -13,27 +13,14 @@ import net.minecraft.resources.ResourceLocation;
 import java.net.URI;
 
 public class UpdateNotificationWidget extends AbstractWidget {
-    // Replaced ResourceLocation.parse with ResourceLocation.tryParse for better compatibility/safety
-    // If tryParse is missing (it shouldn't be in 1.21), we can fallback to constructor if available.
-    // However, the crash was NoSuchMethodError for 'm_338530_' which is 'parse'.
-    // 'tryParse' is usually 'm_135820_' or similar.
-    // Let's use ResourceLocation.fromNamespaceAndPath if available, or just new ResourceLocation(ns, path) is deprecated/removed?
-    // In 1.21, `new ResourceLocation` is gone.
-    // `ResourceLocation.withDefaultNamespace` is common.
-    // Let's stick to `ResourceLocation.parse` but ensure we are compiling against the right mapping that Forge expects?
-    // Actually, Common uses official Mojang mappings. Forge runtime uses SRG remapped to Official.
-    // If `parse` isn't found, it might be that Forge is remapping it to something else or the runtime jar is weird.
-    // But `tryParse` is safer.
+    // 1. Fix Forge Crash: Avoid ResourceLocation.parse/tryParse static init issues.
+    // We'll use a safer approach: ResourceLocation.fromNamespaceAndPath if possible, or lazy init.
+    // The crash `NoSuchMethodError: '... m_135820_(java.lang.String)'` implies `tryParse` is also problematic in the Forge env.
+    // We will use `ResourceLocation.fromNamespaceAndPath("minecraft", "toast/advancement")`.
+    // In 1.21.1 Mojang mappings, this is `ResourceLocation.fromNamespaceAndPath(String, String)`.
 
-    // BUT, wait. `toast/advancement` is not a valid namespace:path. It's missing the namespace!
-    // It should be `minecraft:toast/advancement`.
-    // `parse("toast/advancement")` assumes namespace `minecraft` in some contexts or fails?
-    // `ResourceLocation.parse` handles default namespace? Yes.
+    private static final ResourceLocation TEXTURE = ResourceLocation.fromNamespaceAndPath("minecraft", "toast/advancement");
 
-    // The safest way is `ResourceLocation.fromNamespaceAndPath("minecraft", "toast/advancement")` if it exists.
-    // Or just `ResourceLocation.tryParse("minecraft:toast/advancement")`.
-
-    private static final ResourceLocation TEXTURE = ResourceLocation.tryParse("minecraft:toast/advancement");
     private static final int TOAST_WIDTH = 160;
     private static final int TOAST_HEIGHT = 32;
     private final Button downloadBtn;
@@ -41,7 +28,8 @@ public class UpdateNotificationWidget extends AbstractWidget {
 
     public UpdateNotificationWidget(int x, int y) {
         super(x, y, TOAST_WIDTH, TOAST_HEIGHT, Component.literal("Update Notification"));
-        this.visible = false; // Start hidden
+        // 2. Fix Missing Notification: Start visible so renderWidget is called.
+        this.visible = true;
 
         this.downloadBtn = Button.builder(Component.literal("Download"), (btn) -> {
             if (!UpdateChecker.downloadUrl.isEmpty()) {
@@ -52,24 +40,23 @@ public class UpdateNotificationWidget extends AbstractWidget {
 
     @Override
     public void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        // Check update availability. If not available, do not render.
         if (!UpdateChecker.updateAvailable) {
-            this.visible = false;
             return;
         }
 
-        // Activate if not already
-        if (!this.visible) {
-            this.visible = true;
+        // Start timer on first *actual* render
+        if (firstRenderTime == -1) {
             this.firstRenderTime = System.currentTimeMillis();
         }
 
-        // Timer check
-        if (firstRenderTime > 0 && System.currentTimeMillis() - firstRenderTime > 15000) {
+        // Hide after 15 seconds
+        if (System.currentTimeMillis() - firstRenderTime > 15000) {
             this.visible = false;
             return;
         }
 
-        // Render Background
+        // Render
         if (TEXTURE != null) {
             guiGraphics.blitSprite(TEXTURE, this.getX(), this.getY(), this.width, this.height);
         }
@@ -82,7 +69,11 @@ public class UpdateNotificationWidget extends AbstractWidget {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (!this.visible) return false;
+        // If not effectively visible (no update or timer expired), ignore clicks
+        if (!this.visible || !UpdateChecker.updateAvailable || (firstRenderTime > 0 && System.currentTimeMillis() - firstRenderTime > 15000)) {
+            return false;
+        }
+
         if (this.downloadBtn.mouseClicked(mouseX, mouseY, button)) return true;
         return super.mouseClicked(mouseX, mouseY, button);
     }
