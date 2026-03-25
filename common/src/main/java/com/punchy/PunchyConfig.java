@@ -17,24 +17,56 @@ public class PunchyConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static File configFile;
 
+    // ── Rendering / animation settings ──────────────────────────────────────
+    public boolean renderArmorArmsFP             = false;
+    public boolean bettercombatCompat            = false;
+    public float   animationSpeed                = 5.5f;
+    public boolean enableMod                     = true;
+    public boolean enableTuning                  = false;
+    public boolean disableResourcePackModelParts = false;
+    public boolean disableArmPhysics             = false;
+    public boolean disableNativeItemPhysics      = false;
+    public boolean disableBoatMinecartRaftModels = false;
+    public boolean disablePistonModels           = false;
+    public boolean disableChestModels            = false;
+    public boolean disableEnchantingTableModels  = false;
+    public boolean disableBoatFirstPersonAnimations = false;
+    public boolean disableEnhancedFireArmEffects = false;
+
+    // ── Item blacklist ───────────────────────────────────────────────────────
+    /**
+     * List of item IDs or mod IDs for which Punchy animations are disabled.
+     *
+     * Supported formats:
+     *   modid:item_id          → disables one specific item
+     *   modid                  → disables every item from that mod
+     *   modid:*_sword          → glob wildcard – disables all items whose ID ends with _sword
+     *   minecraft:.*axe        → raw regex is also accepted
+     *
+     * To find an item's ID in-game, press F3 + H and hover over the item.
+     */
     public List<String> itemBlacklist = new ArrayList<>();
 
-    // Runtime cache for regex patterns
+    // Runtime cache – not serialised.
     private transient List<Pattern> blacklistPatterns = new ArrayList<>();
 
     public static PunchyConfig instance;
+
+    // ── Load / save ──────────────────────────────────────────────────────────
 
     public static void load(File file) {
         configFile = file;
         if (file.exists()) {
             try (FileReader reader = new FileReader(file)) {
                 instance = GSON.fromJson(reader, PunchyConfig.class);
+                if (instance == null) instance = new PunchyConfig();
             } catch (IOException e) {
                 e.printStackTrace();
                 instance = new PunchyConfig();
             }
         } else {
             instance = new PunchyConfig();
+            // Sensible demo defaults
             instance.itemBlacklist.add("minecraft:lantern");
             instance.itemBlacklist.add("minecraft");
             instance.save();
@@ -51,49 +83,77 @@ public class PunchyConfig {
         compilePatterns();
     }
 
+    // ── Pattern compilation ──────────────────────────────────────────────────
+
+    /**
+     * Converts each blacklist entry to a compiled {@link Pattern}.
+     *
+     * Conversion rules:
+     * <ol>
+     *   <li>If the entry contains no colon it is treated as a mod ID and expanded
+     *       to {@code modid:.*} (matches all items from that mod).</li>
+     *   <li>All regex special characters are escaped EXCEPT {@code *}, which is
+     *       treated as a glob wildcard and expanded to {@code .*}.</li>
+     *   <li>If the entry already contains {@code .*} it is used as-is (raw regex).</li>
+     * </ol>
+     */
     private void compilePatterns() {
+        if (blacklistPatterns == null) blacklistPatterns = new ArrayList<>();
         blacklistPatterns.clear();
+
         for (String entry : itemBlacklist) {
-            String regex = entry;
-            // Basic glob to regex conversion
-            // If no colon, assume it's a mod id and match all items in it
-            if (!regex.contains(":")) {
-                regex = regex + ":.*";
-            }
-
-            // Escape special regex characters if they are not meant to be wildcards?
-            // Prompt implies specific wildcard usage.
-            // Let's just replace * with .* and be careful.
-            // A more robust solution would escape everything except *, then replace * with .*
-            // But for this demo, simple replacement is okay.
-            // We should ensure we don't break existing regex syntax if the user intends to use it.
-            // "Make blacklisting items have regex/regex like capabilities"
-
-            // If the user inputs ".*sword", it works as regex.
-            // If "mod:*sword", we replace * -> .*. "mod:.*sword".
-
-            // To be safe, let's just replace * with .* if it's not already .*
-            // Actually, simply replacing * with .* is standard "glob-like".
-
-            if (!regex.contains(".*")) {
-                 regex = regex.replace("*", ".*");
-            }
-
+            if (entry == null || entry.isBlank()) continue;
             try {
+                String regex = entryToRegex(entry);
                 blacklistPatterns.add(Pattern.compile(regex));
             } catch (Exception e) {
-                System.err.println("Invalid regex in blacklist: " + entry);
+                System.err.println("[Punchy] Invalid blacklist entry (skipping): " + entry);
             }
         }
     }
 
+    private static String entryToRegex(String entry) {
+        // Raw regex — user explicitly wrote .*  or  other regex syntax
+        if (entry.contains(".*")) {
+            return entry;
+        }
+
+        // No colon → treat as mod ID → match all items
+        String pattern = entry.contains(":") ? entry : entry + ":.*";
+
+        // Glob → regex: escape special chars, convert * to .*
+        StringBuilder sb = new StringBuilder("^");
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+            switch (c) {
+                case '*'  -> sb.append(".*");
+                case '.'  -> sb.append("\\.");
+                case '+'  -> sb.append("\\+");
+                case '?'  -> sb.append("\\?");
+                case '^'  -> sb.append("\\^");
+                case '$'  -> sb.append("\\$");
+                case '{'  -> sb.append("\\{");
+                case '}'  -> sb.append("\\}");
+                case '('  -> sb.append("\\(");
+                case ')'  -> sb.append("\\)");
+                case '['  -> sb.append("\\[");
+                case ']'  -> sb.append("\\]");
+                case '\\' -> sb.append("\\\\");
+                case '|'  -> sb.append("\\|");
+                default   -> sb.append(c);
+            }
+        }
+        sb.append("$");
+        return sb.toString();
+    }
+
+    // ── Public API ───────────────────────────────────────────────────────────
+
     public boolean isBlacklisted(ItemStack stack) {
-        if (instance == null) return false;
+        if (instance == null || blacklistPatterns == null) return false;
         String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
         for (Pattern p : blacklistPatterns) {
-            if (p.matcher(id).matches()) {
-                return true;
-            }
+            if (p.matcher(id).matches()) return true;
         }
         return false;
     }
