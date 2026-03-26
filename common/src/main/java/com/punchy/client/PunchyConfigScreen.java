@@ -79,7 +79,7 @@ public class PunchyConfigScreen extends Screen {
     public void renderBackground(GuiGraphics g, int mx, int my, float partial) {
         // Skip super.renderBackground() — that triggers the world blur.
         // Use a solid opaque gradient so the screen has no transparency at all.
-        g.fillGradient(0, 0, this.width, this.height, 0xFF0E0E18, 0xFF080810);
+        g.fillGradient(0, 0, this.width, this.height, 0xFF1E1E2E, 0xFF16162A);
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
@@ -231,13 +231,13 @@ public class PunchyConfigScreen extends Screen {
 
     private void drawPanels(GuiGraphics g) {
         // Rules / sort strip (slightly lighter than the dark base)
-        g.fill(0, HEADER_H, this.width, HEADER_H + RULES_H, 0x28FFFFFF);
+        g.fill(0, HEADER_H, this.width, HEADER_H + RULES_H, 0x50FFFFFF);
         // Column-header strip
         int chY = HEADER_H + RULES_H;
-        g.fill(0, chY, this.width, chY + COL_HDR_H, 0x20FFFFFF);
+        g.fill(0, chY, this.width, chY + COL_HDR_H, 0x40FFFFFF);
         // Vertical divider
         int sepX = leftX() + colW() + GAP / 2;
-        g.fill(sepX, HEADER_H, sepX + 1, this.height - FOOTER_H, 0x44FFFFFF);
+        g.fill(sepX, HEADER_H, sepX + 1, this.height - FOOTER_H, 0x66FFFFFF);
     }
 
     // ── Header ────────────────────────────────────────────────────────────────
@@ -359,19 +359,22 @@ public class PunchyConfigScreen extends Screen {
                                && my >= y && my < y + CELL
                                && my >= gTop && my < gTop + gH;
 
+                // Per-cell background so items are visible against the dark screen
+                g.fill(x, y, x + CELL, y + CELL, 0xFF2A2A3C);
+
                 if (hovered) {
-                    g.fill(x, y, x + CELL, y + CELL, 0x55FFFFFF);
+                    g.fill(x, y, x + CELL, y + CELL, 0x66FFFFFF);
                     pendingTooltipStack = stack;
                     pendingTooltipId    = info.id().toString();
                 } else if (isDisabled) {
-                    g.fill(x, y, x + CELL, y + CELL, 0x22FF2222);
+                    g.fill(x, y, x + CELL, y + CELL, 0x44FF2222);
                 }
 
                 g.renderItem(stack, x + 2, y + 2);
 
-                // Subtle red tint only – no black overlay (too dark on dark backgrounds)
+                // Red tint on top of item for disabled cells
                 if (isDisabled && !hovered) {
-                    g.fill(x, y, x + CELL, y + CELL, 0x22FF2222);
+                    g.fill(x, y, x + CELL, y + CELL, 0x33FF2222);
                 }
             }
         }

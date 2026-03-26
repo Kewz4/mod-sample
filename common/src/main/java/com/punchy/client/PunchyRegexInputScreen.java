@@ -28,7 +28,7 @@ public class PunchyRegexInputScreen extends Screen {
     @Override
     public void renderBackground(GuiGraphics g, int mx, int my, float partial) {
         // Skip super — no blur. Solid opaque dark background.
-        g.fillGradient(0, 0, this.width, this.height, 0xFF0E0E18, 0xFF080810);
+        g.fillGradient(0, 0, this.width, this.height, 0xFF1E1E2E, 0xFF16162A);
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
