@@ -1,11 +1,11 @@
 package com.punchy.mixin;
 
 import com.punchy.UpdateChecker;
+import com.punchy.client.PunchyUpdateToast;
 import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
-import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
@@ -80,17 +80,11 @@ public abstract class MixinTitleScreen extends net.minecraft.client.gui.screens.
                 .build()
         );
 
-        // ── One-time toast notification ───────────────────────────────────────
+        // ── One-time custom toast notification ───────────────────────────────
         if (!UpdateChecker.popupShown) {
             UpdateChecker.popupShown = true;
-            SystemToast.add(
-                    this.minecraft.getToasts(),
-                    SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
-                    Component.literal("Punchy – Update Available"),
-                    Component.literal(
-                            "Update available, please download and install\n"
-                            + "the new version (" + UpdateChecker.latestVersion + ") and relaunch.")
-            );
+            this.minecraft.getToasts().addToast(
+                    new PunchyUpdateToast(UpdateChecker.latestVersion));
         }
     }
 
