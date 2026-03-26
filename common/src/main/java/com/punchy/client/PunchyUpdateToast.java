@@ -13,11 +13,10 @@ import net.minecraft.resources.ResourceLocation;
  * it blends naturally with Minecraft's UI, then draws a coloured accent bar,
  * title, subtitle, and a progress bar that drains over the display period.
  *
- * Only one instance is shown at a time (shared {@link Token}).
+ * Only one instance is shown at a time (guarded by {@link com.punchy.UpdateChecker#popupShown}).
  */
 public class PunchyUpdateToast implements Toast {
 
-    private static final Token TOKEN       = new Token() {};
     private static final long  DISPLAY_MS  = 8_000L;  // 8 s display time
 
     // Vanilla nine-slice toast background
@@ -39,9 +38,8 @@ public class PunchyUpdateToast implements Toast {
         this.version = version;
     }
 
-    @Override public int    width()    { return W; }
-    @Override public int    height()   { return H; }
-    @Override public Token  getToken() { return TOKEN; }
+    @Override public int width()  { return W; }
+    @Override public int height() { return H; }
 
     @Override
     public Visibility render(GuiGraphics g, ToastComponent tc, long elapsed) {
