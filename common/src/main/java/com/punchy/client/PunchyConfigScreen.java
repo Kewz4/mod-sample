@@ -75,16 +75,11 @@ public class PunchyConfigScreen extends Screen {
 
     // ── Background ────────────────────────────────────────────────────────────
 
-    /**
-     * Override renderBackground to add a solid dark overlay on top of the MC
-     * world/blur so the screen content is always legible regardless of what is
-     * behind it.
-     */
     @Override
     public void renderBackground(GuiGraphics g, int mx, int my, float partial) {
-        super.renderBackground(g, mx, my, partial);
-        // Lighter overlay – enough to make text crisp without making items invisible
-        g.fill(0, 0, this.width, this.height, 0x99080808);
+        // Skip super.renderBackground() — that triggers the world blur.
+        // Use a solid opaque gradient so the screen has no transparency at all.
+        g.fillGradient(0, 0, this.width, this.height, 0xFF0E0E18, 0xFF080810);
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
