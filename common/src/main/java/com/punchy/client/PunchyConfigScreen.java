@@ -1,5 +1,6 @@
 package com.punchy.client;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.punchy.ItemFetcher;
 import com.punchy.PunchyConfig;
 import net.minecraft.ChatFormatting;
@@ -12,16 +13,14 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 
 /**
  * Two-column item-grid config screen.
  *
  * Z-order (back → front):
- *   1. renderBackground() — MC world/blur (overridden to add solid dark overlay)
- *   2. Panel strips / fills / item renders
+ *   1. renderBackground() — standard MC background (blur cancelled by MixinGameRenderer)
+ *   2. Panel strips / item renders
  *   3. super.render()     — Button + EditBox widgets
  *   4. Item tooltip        — drawn absolutely last
  */
@@ -38,18 +37,17 @@ public class PunchyConfigScreen extends Screen {
     // ── Layout constants ──────────────────────────────────────────────────────
     private static final int CELL        = 20;
     private static final int SCROLLBAR_W = 3;
-    private static final int GAP         = 6;    // gap between the two columns
-    private static final int PAD         = 4;    // outer padding
+    private static final int GAP         = 6;
+    private static final int PAD         = 4;
 
-    // Sort buttons drawn on right end of the rules row
     private static final int SORT_BTN_W  = 26;
     private static final int SORT_BTN_H  = 14;
     private static final int SORT_COUNT  = SortMode.values().length;
     private static final int SORT_AREA_W = SORT_COUNT * SORT_BTN_W + (SORT_COUNT - 1) * 2 + PAD;
 
-    private static final int HEADER_H    = 52;   // title + help lines + search row
-    private static final int RULES_H     = 22;   // active-rules chip row (+ sort buttons)
-    private static final int COL_HDR_H   = 13;   // "✓ ENABLED / ✗ DISABLED" labels
+    private static final int HEADER_H    = 46;
+    private static final int RULES_H     = 18;
+    private static final int COL_HDR_H   = 13;
     private static final int FOOTER_H    = 30;
 
     // ── State ─────────────────────────────────────────────────────────────────
@@ -58,10 +56,12 @@ public class PunchyConfigScreen extends Screen {
     private final List<ItemFetcher.ItemInfo> enabledItems  = new ArrayList<>();
     private final List<ItemFetcher.ItemInfo> disabledItems = new ArrayList<>();
 
+    /** Items whose renderers crash — skipped to avoid exceptions every frame. */
+    private final Set<String> brokenItems = new HashSet<>();
+
     private EditBox searchBox;
     private int enabledScroll  = 0;
     private int disabledScroll = 0;
-    private int rulesScrollX   = 0;
 
     private ItemStack pendingTooltipStack = null;
     private String    pendingTooltipId    = null;
@@ -77,8 +77,6 @@ public class PunchyConfigScreen extends Screen {
 
     @Override
     public void renderBackground(GuiGraphics g, int mx, int my, float partial) {
-        // Use the standard MC background (dirt/panorama in main menu, world+overlay
-        // in-game). MixinGameRenderer cancels the blur shader so the world stays sharp.
         super.renderBackground(g, mx, my, partial);
     }
 
@@ -88,18 +86,19 @@ public class PunchyConfigScreen extends Screen {
     protected void init() {
         if (allItems == null) allItems = ItemFetcher.getAllItems();
 
-        // Search box: left-label + box that stops before the sort button area
         int labelW = this.font.width("Search: ");
         int sbX    = PAD + labelW + 2;
         int sbW    = Math.min(220, this.width - sbX - SORT_AREA_W - PAD);
-        searchBox  = new EditBox(this.font, sbX, HEADER_H - 18, sbW, 16,
+        searchBox  = new EditBox(this.font, sbX, HEADER_H - 14, sbW, 12,
                 Component.literal("Search"));
         searchBox.setMaxLength(128);
         searchBox.setResponder(t -> refresh());
         this.addRenderableWidget(searchBox);
 
-        // Footer buttons
-        int footY = this.height - FOOTER_H + 5;
+        // ── Footer buttons ────────────────────────────────────────────────────
+        int footY = this.height - FOOTER_H + (FOOTER_H - 20) / 2;
+        int x     = PAD;
+
         this.addRenderableWidget(
                 Button.builder(Component.literal("Add Rule / Regex"), btn ->
                         this.minecraft.setScreen(new PunchyRegexInputScreen(this, rule -> {
@@ -109,15 +108,52 @@ public class PunchyConfigScreen extends Screen {
                                 refresh();
                             }
                         })))
-                        .bounds(PAD, footY, 130, 20)
+                        .bounds(x, footY, 118, 20)
+                        .build());
+        x += 122;
+
+        this.addRenderableWidget(
+                Button.builder(Component.literal("Add All"), btn -> addAll())
+                        .bounds(x, footY, 58, 20)
+                        .build());
+        x += 62;
+
+        this.addRenderableWidget(
+                Button.builder(Component.literal("Remove All"), btn -> removeAll())
+                        .bounds(x, footY, 72, 20)
+                        .build());
+        x += 76;
+
+        this.addRenderableWidget(
+                Button.builder(Component.literal("View Rules"), btn ->
+                        this.minecraft.setScreen(new PunchyRulesScreen(this)))
+                        .bounds(x, footY, 68, 20)
                         .build());
 
         this.addRenderableWidget(
                 Button.builder(CommonComponents.GUI_DONE, btn ->
                         this.minecraft.setScreen(this.parent))
-                        .bounds(this.width - 106, footY, 100, 20)
+                        .bounds(this.width - 104, footY, 100, 20)
                         .build());
 
+        refresh();
+    }
+
+    // ── Button actions ────────────────────────────────────────────────────────
+
+    private void addAll() {
+        List<String> bl = PunchyConfig.instance.itemBlacklist;
+        for (ItemFetcher.ItemInfo info : enabledItems) {
+            String id = info.id().toString();
+            if (!bl.contains(id)) bl.add(id);
+        }
+        PunchyConfig.instance.save();
+        refresh();
+    }
+
+    private void removeAll() {
+        PunchyConfig.instance.itemBlacklist.clear();
+        PunchyConfig.instance.save();
         refresh();
     }
 
@@ -133,28 +169,26 @@ public class PunchyConfigScreen extends Screen {
         };
     }
 
-    /**
-     * Returns a stable sort key based on common item-ID suffixes, so items of
-     * the same "type" (weapons, tools, armour, blocks…) cluster together.
-     */
     private String itemCategory(ItemFetcher.ItemInfo info) {
         String p = info.id().getPath();
-        if (p.endsWith("_sword"))                                        return "0_weapons";
-        if (p.endsWith("_axe") && !p.contains("block"))                  return "0_weapons";
-        if (p.endsWith("_pickaxe") || p.endsWith("_shovel")
-                || p.endsWith("_hoe"))                                   return "1_tools";
+        if (p.endsWith("_sword") || (p.endsWith("_axe") && !p.contains("block")))
+            return "0_weapons";
+        if (p.endsWith("_pickaxe") || p.endsWith("_shovel") || p.endsWith("_hoe"))
+            return "1_tools";
         if (p.endsWith("_helmet") || p.endsWith("_chestplate")
-                || p.endsWith("_leggings") || p.endsWith("_boots"))      return "2_armor";
-        if (p.endsWith("_block") || p.endsWith("_slab")
-                || p.endsWith("_stairs") || p.endsWith("_wall")
-                || p.endsWith("_planks") || p.endsWith("_log")
-                || p.endsWith("_bricks") || p.endsWith("_tile"))         return "3_blocks";
-        if (p.endsWith("_ore"))                                           return "4_ores";
+                || p.endsWith("_leggings") || p.endsWith("_boots"))
+            return "2_armor";
+        if (p.endsWith("_block") || p.endsWith("_slab") || p.endsWith("_stairs")
+                || p.endsWith("_wall") || p.endsWith("_planks") || p.endsWith("_log")
+                || p.endsWith("_bricks") || p.endsWith("_tile"))
+            return "3_blocks";
+        if (p.endsWith("_ore"))    return "4_ores";
         if (p.endsWith("_ingot") || p.endsWith("_nugget")
-                || p.endsWith("_dust") || p.endsWith("_crystal"))        return "5_materials";
-        if (p.endsWith("_seeds") || p.endsWith("_sapling")
-                || p.endsWith("_flower") || p.endsWith("_mushroom")
-                || p.endsWith("_crop"))                                   return "6_plants";
+                || p.endsWith("_dust") || p.endsWith("_crystal"))
+            return "5_materials";
+        if (p.endsWith("_seeds") || p.endsWith("_sapling") || p.endsWith("_flower")
+                || p.endsWith("_mushroom") || p.endsWith("_crop"))
+            return "6_plants";
         return "9_misc";
     }
 
@@ -203,7 +237,7 @@ public class PunchyConfigScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mx, int my, float partial) {
-        renderBackground(g, mx, my, partial);   // solid dark overlay included
+        renderBackground(g, mx, my, partial);
 
         pendingTooltipStack = null;
         pendingTooltipId    = null;
@@ -215,9 +249,8 @@ public class PunchyConfigScreen extends Screen {
         drawGrid(g, mx, my, enabledItems,  leftX(),  enabledScroll,  false);
         drawGrid(g, mx, my, disabledItems, rightX(), disabledScroll, true);
 
-        super.render(g, mx, my, partial);   // widgets on top of everything
+        super.render(g, mx, my, partial);
 
-        // Tooltip last – floats above all widgets
         if (pendingTooltipStack != null) {
             List<FormattedCharSequence> lines = new ArrayList<>();
             lines.add(pendingTooltipStack.getHoverName().getVisualOrderText());
@@ -230,14 +263,11 @@ public class PunchyConfigScreen extends Screen {
     // ── Panel strips ──────────────────────────────────────────────────────────
 
     private void drawPanels(GuiGraphics g) {
-        // Rules / sort strip (slightly lighter than the dark base)
-        g.fill(0, HEADER_H, this.width, HEADER_H + RULES_H, 0x50FFFFFF);
-        // Column-header strip
+        g.fill(0, HEADER_H, this.width, HEADER_H + RULES_H, 0x40FFFFFF);
         int chY = HEADER_H + RULES_H;
-        g.fill(0, chY, this.width, chY + COL_HDR_H, 0x40FFFFFF);
-        // Vertical divider
+        g.fill(0, chY, this.width, chY + COL_HDR_H, 0x30FFFFFF);
         int sepX = leftX() + colW() + GAP / 2;
-        g.fill(sepX, HEADER_H, sepX + 1, this.height - FOOTER_H, 0x66FFFFFF);
+        g.fill(sepX, HEADER_H, sepX + 1, this.height - FOOTER_H, 0x55FFFFFF);
     }
 
     // ── Header ────────────────────────────────────────────────────────────────
@@ -246,48 +276,42 @@ public class PunchyConfigScreen extends Screen {
         int cx = this.width / 2;
         g.drawCenteredString(font, this.title, cx, 4, 0xFFFFFF);
         g.drawCenteredString(font,
-                "Click items to toggle.  Use  modid:item,  modid,  or  modid:*_sword  wildcards.",
-                cx, 14, 0x888888);
-        g.drawCenteredString(font,
-                "F3+H to find item IDs  ·  Regex also supported  (e.g.  examplemod:.*_axe)",
-                cx, 23, 0x666666);
-        g.drawString(font, "Search:", PAD, HEADER_H - 13, 0xAAAAAA, false);
+                "Click items to toggle · modid:item · modid · modid:*_sword · modid:.*_axe",
+                cx, 15, 0x888888);
+        g.drawString(font, "Search:", PAD, HEADER_H - 11, 0xAAAAAA, false);
     }
 
-    // ── Rules chips + sort buttons (share one row) ────────────────────────────
+    // ── Rules chips + sort buttons ────────────────────────────────────────────
 
     private void drawRulesAndSortRow(GuiGraphics g, int mx, int my) {
         int rowY = HEADER_H;
         int rowH = RULES_H;
 
-        // ── Chips (left side, clipped before the sort area) ───────────────────
         int chipsRight = this.width - SORT_AREA_W;
         g.enableScissor(0, rowY, chipsRight, rowY + rowH);
 
         List<String> rules = PunchyConfig.instance.itemBlacklist;
         if (rules.isEmpty()) {
-            g.drawString(font, "No active rules – use 'Add Rule / Regex' to add one.",
-                    PAD - rulesScrollX, rowY + (rowH - font.lineHeight) / 2, 0x555555, false);
+            g.drawString(font, "No rules active – use 'Add Rule / Regex' below.",
+                    PAD, rowY + (rowH - font.lineHeight) / 2, 0x555555, false);
         } else {
-            int x  = PAD - rulesScrollX;
-            int cy = rowY + 2;
-            int ch = rowH - 4;
+            int x  = PAD;
+            int cy = rowY + 1;
+            int ch = rowH - 2;
             for (String rule : rules) {
-                int chipW = font.width(rule) + 22;
+                int chipW = font.width(rule) + 20;
                 g.fill(x, cy, x + chipW, cy + ch, 0xAA222222);
-                g.fill(x, cy, x + chipW, cy + 1,  0x66888888);  // top border
-                g.drawString(font, rule, x + 4, cy + (ch - font.lineHeight) / 2, 0xFFCC44, false);
-                int xBtnX = x + chipW - 14;
-                boolean hov = mx >= xBtnX && mx < xBtnX + 12 && my >= cy && my < cy + ch;
+                g.drawString(font, rule, x + 3, cy + (ch - font.lineHeight) / 2, 0xFFCC44, false);
+                int xBtnX = x + chipW - 13;
+                boolean hov = mx >= xBtnX && mx < xBtnX + 11 && my >= cy && my < cy + ch;
                 g.drawString(font, "×", xBtnX, cy + (ch - font.lineHeight) / 2,
-                        hov ? 0xFF4455 : 0x777777, false);
-                x += chipW + 4;
+                        hov ? 0xFF6666 : 0x777777, false);
+                x += chipW + 3;
             }
         }
 
         g.disableScissor();
 
-        // ── Sort buttons (right side, always visible) ─────────────────────────
         SortMode[] modes = SortMode.values();
         int btnY  = rowY + (rowH - SORT_BTN_H) / 2;
         int btnX0 = this.width - SORT_AREA_W + PAD / 2;
@@ -299,32 +323,27 @@ public class PunchyConfigScreen extends Screen {
             boolean  hov    = mx >= btnX && mx < btnX + SORT_BTN_W
                            && my >= btnY && my < btnY + SORT_BTN_H;
 
-            // bg
-            int bg = active ? 0xFF224422 : (hov ? 0x44FFFFFF : 0x22FFFFFF);
-            g.fill(btnX, btnY, btnX + SORT_BTN_W, btnY + SORT_BTN_H, bg);
-            // border (bright if active)
+            int bg     = active ? 0xFF224422 : (hov ? 0x44FFFFFF : 0x22FFFFFF);
             int border = active ? 0xFF55AA55 : 0x44888888;
-            g.fill(btnX,                   btnY,                    btnX + SORT_BTN_W, btnY + 1,           border);
-            g.fill(btnX,                   btnY + SORT_BTN_H - 1,   btnX + SORT_BTN_W, btnY + SORT_BTN_H, border);
-            g.fill(btnX,                   btnY,                    btnX + 1,           btnY + SORT_BTN_H, border);
-            g.fill(btnX + SORT_BTN_W - 1, btnY,                    btnX + SORT_BTN_W, btnY + SORT_BTN_H, border);
-
+            g.fill(btnX, btnY, btnX + SORT_BTN_W, btnY + SORT_BTN_H, bg);
+            g.fill(btnX,                   btnY,                   btnX + SORT_BTN_W, btnY + 1,           border);
+            g.fill(btnX,                   btnY + SORT_BTN_H - 1,  btnX + SORT_BTN_W, btnY + SORT_BTN_H, border);
+            g.fill(btnX,                   btnY,                   btnX + 1,           btnY + SORT_BTN_H, border);
+            g.fill(btnX + SORT_BTN_W - 1, btnY,                   btnX + SORT_BTN_W, btnY + SORT_BTN_H, border);
             int labelColor = active ? 0xFF88FF88 : (hov ? 0xFFCCCCCC : 0xFF888888);
             g.drawCenteredString(font, mode.label,
-                    btnX + SORT_BTN_W / 2,
-                    btnY + (SORT_BTN_H - font.lineHeight) / 2,
-                    labelColor);
+                    btnX + SORT_BTN_W / 2, btnY + (SORT_BTN_H - font.lineHeight) / 2, labelColor);
         }
     }
 
     // ── Column headers ────────────────────────────────────────────────────────
 
     private void drawColumnHeaders(GuiGraphics g) {
-        int y    = HEADER_H + RULES_H;
-        String sortLabel = " [" + sortMode.label + "]";
-        g.drawCenteredString(font, "✓ Enabled  (" + enabledItems.size() + ")" + sortLabel,
+        int y         = HEADER_H + RULES_H;
+        String sortLbl = " [" + sortMode.label + "]";
+        g.drawCenteredString(font, "✓ Enabled (" + enabledItems.size() + ")" + sortLbl,
                 leftX() + colW() / 2, y + 2, 0x55FF55);
-        g.drawCenteredString(font, "✗ Disabled  (" + disabledItems.size() + ")" + sortLabel,
+        g.drawCenteredString(font, "✗ Disabled (" + disabledItems.size() + ")" + sortLbl,
                 rightX() + colW() / 2, y + 2, 0xFF5555);
     }
 
@@ -344,48 +363,51 @@ public class PunchyConfigScreen extends Screen {
                     isDisabled ? "No disabled items" : "No enabled items",
                     colX + colW() / 2, gTop + gH / 2 - 4, 0x444444);
         } else {
-            for (int i = 0; i < items.size(); i++) {
-                int col = i % nCols;
-                int row = i / nCols;
-                int x   = colX + col * CELL;
-                int y   = gTop - scroll + row * CELL;
+            // Only iterate rows that are actually visible — avoids O(n) over all items
+            int firstRow = scroll / CELL;
+            int lastRow  = (scroll + gH + CELL - 1) / CELL;
 
-                if (y + CELL <= gTop || y >= gTop + gH) continue;
+            for (int row = firstRow; row <= lastRow; row++) {
+                for (int col = 0; col < nCols; col++) {
+                    int i = row * nCols + col;
+                    if (i >= items.size()) break;
 
-                ItemFetcher.ItemInfo info  = items.get(i);
-                ItemStack            stack = new ItemStack(info.item());
+                    ItemFetcher.ItemInfo info = items.get(i);
+                    int x = colX + col * CELL;
+                    int y = gTop - scroll + row * CELL;
 
-                boolean hovered = mx >= x && mx < x + CELL
-                               && my >= y && my < y + CELL
-                               && my >= gTop && my < gTop + gH;
+                    ItemStack stack = new ItemStack(info.item());
 
-                // Per-cell background so items are visible against the dark screen
-                g.fill(x, y, x + CELL, y + CELL, 0xFF2A2A3C);
+                    boolean hovered = mx >= x && mx < x + CELL
+                                   && my >= y && my < y + CELL
+                                   && my >= gTop && my < gTop + gH;
 
-                if (hovered) {
-                    g.fill(x, y, x + CELL, y + CELL, 0x66FFFFFF);
-                    pendingTooltipStack = stack;
-                    pendingTooltipId    = info.id().toString();
-                } else if (isDisabled) {
-                    g.fill(x, y, x + CELL, y + CELL, 0x44FF2222);
-                }
+                    if (hovered) {
+                        g.fill(x, y, x + CELL, y + CELL, 0x55FFFFFF);
+                        pendingTooltipStack = stack;
+                        pendingTooltipId    = info.id().toString();
+                    } else if (isDisabled) {
+                        g.fill(x, y, x + CELL, y + CELL, 0x33FF2222);
+                    }
 
-                try {
-                    g.renderItem(stack, x + 2, y + 2);
-                } catch (Exception ignored) {
-                    // Some mod items (e.g. Avaritia cosmic items) crash when rendered
-                    // outside of a world context — skip them silently.
-                }
-
-                // Red tint on top of item for disabled cells
-                if (isDisabled && !hovered) {
-                    g.fill(x, y, x + CELL, y + CELL, 0x33FF2222);
+                    String itemId = info.id().toString();
+                    if (!brokenItems.contains(itemId)) {
+                        try {
+                            g.renderItem(stack, x + 2, y + 2);
+                        } catch (Exception e) {
+                            // Cache so we never try (and throw) this item again.
+                            // Also reset any rendering state the failed render may have dirtied.
+                            brokenItems.add(itemId);
+                            RenderSystem.enableDepthTest();
+                            RenderSystem.enableBlend();
+                            RenderSystem.defaultBlendFunc();
+                        }
+                    }
                 }
             }
         }
 
         g.disableScissor();
-
         drawScrollbar(g, colX + colW() - SCROLLBAR_W, gTop, gH, scroll, contentH(items.size()));
     }
 
@@ -415,10 +437,6 @@ public class PunchyConfigScreen extends Screen {
                 disabledScroll = clampScroll(disabledScroll + delta, disabledItems.size(), gH);
             return true;
         }
-        if (my >= HEADER_H && my < HEADER_H + RULES_H) {
-            rulesScrollX = Math.max(0, rulesScrollX - (int)(dY * 20));
-            return true;
-        }
         return false;
     }
 
@@ -431,7 +449,7 @@ public class PunchyConfigScreen extends Screen {
         if (super.mouseClicked(mx, my, btn)) return true;
         if (btn != 0) return false;
 
-        // Sort buttons (rules row, right side)
+        // Sort buttons + chip × buttons in rules row
         if (my >= HEADER_H && my < HEADER_H + RULES_H) {
             int btnY  = HEADER_H + (RULES_H - SORT_BTN_H) / 2;
             int btnX0 = this.width - SORT_AREA_W + PAD / 2;
@@ -445,23 +463,22 @@ public class PunchyConfigScreen extends Screen {
                 }
             }
 
-            // Chip × buttons
             int chipsRight = this.width - SORT_AREA_W;
             if (mx < chipsRight) {
-                int x  = PAD - rulesScrollX;
-                int cy = HEADER_H + 2, ch = RULES_H - 4;
+                int x  = PAD;
+                int cy = HEADER_H + 1, ch = RULES_H - 2;
                 List<String> rules = PunchyConfig.instance.itemBlacklist;
                 for (int i = 0; i < rules.size(); i++) {
                     String rule  = rules.get(i);
-                    int    chipW = font.width(rule) + 22;
-                    int    xBtn  = x + chipW - 14;
-                    if (mx >= xBtn && mx < xBtn + 12 && my >= cy && my < cy + ch) {
+                    int    chipW = font.width(rule) + 20;
+                    int    xBtn  = x + chipW - 13;
+                    if (mx >= xBtn && mx < xBtn + 11 && my >= cy && my < cy + ch) {
                         rules.remove(i);
                         PunchyConfig.instance.save();
                         refresh();
                         return true;
                     }
-                    x += chipW + 4;
+                    x += chipW + 3;
                 }
             }
         }
