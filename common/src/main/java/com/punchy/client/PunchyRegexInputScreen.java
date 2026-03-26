@@ -12,10 +12,11 @@ import java.util.function.Consumer;
 
 public class PunchyRegexInputScreen extends Screen {
 
-    private static final int BOX_W     = 240;
-    private static final int PANEL_PAD = 14;
+    private static final int PANEL_W   = 280;
+    private static final int PANEL_H   = 152;
+    private static final int PANEL_PAD = 12;
 
-    private final Screen          parent;
+    private final Screen           parent;
     private final Consumer<String> onAdd;
     private EditBox input;
 
@@ -32,21 +33,26 @@ public class PunchyRegexInputScreen extends Screen {
 
     // ── Layout ────────────────────────────────────────────────────────────────
 
+    private int panelX() { return this.width  / 2 - PANEL_W / 2; }
+    private int panelY() { return this.height / 2 - PANEL_H / 2; }
+
     @Override
     protected void init() {
-        int cx = this.width  / 2;
-        int cy = this.height / 2;
+        int px = panelX();
+        int py = panelY();
+        int inputW = PANEL_W - PANEL_PAD * 2;
 
+        // Input box: 98px below panel top
         this.input = new EditBox(this.font,
-                cx - BOX_W / 2, cy - 10,
-                BOX_W, 20,
+                px + PANEL_PAD, py + 98, inputW, 16,
                 Component.literal("Rule"));
         this.input.setMaxLength(256);
-        this.input.setHint(Component.literal("e.g.  modid:*_sword"));
+        this.input.setHint(Component.literal("e.g.  cobblemon  or  modid:*_sword"));
         this.addRenderableWidget(this.input);
 
-        int btnY = cy + 16;
-        int half = BOX_W / 2 - 2;
+        // Buttons: 120px below panel top
+        int half = inputW / 2 - 2;
+        int btnY = py + 122;
         this.addRenderableWidget(
                 Button.builder(Component.literal("Add"), btn -> {
                     String val = input.getValue().trim();
@@ -54,12 +60,12 @@ public class PunchyRegexInputScreen extends Screen {
                         onAdd.accept(val);
                         this.minecraft.setScreen(parent);
                     }
-                }).bounds(cx - BOX_W / 2, btnY, half, 20).build());
+                }).bounds(px + PANEL_PAD, btnY, half, 20).build());
 
         this.addRenderableWidget(
                 Button.builder(CommonComponents.GUI_CANCEL, btn ->
                         this.minecraft.setScreen(parent))
-                        .bounds(cx + 2, btnY, half, 20).build());
+                        .bounds(px + PANEL_PAD + half + 4, btnY, half, 20).build());
     }
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -68,50 +74,50 @@ public class PunchyRegexInputScreen extends Screen {
     public void render(GuiGraphics g, int mouseX, int mouseY, float partial) {
         renderBackground(g, mouseX, mouseY, partial);
 
-        int cx = this.width  / 2;
-        int cy = this.height / 2;
+        int px = panelX();
+        int py = panelY();
+        int cx = this.width / 2;
 
-        // ── Dialog panel ──────────────────────────────────────────────────────
-        int panelX = cx - BOX_W / 2 - PANEL_PAD;
-        int panelY = cy - 68;
-        int panelW = BOX_W + PANEL_PAD * 2;
-        int panelH = 108;
+        // Panel background + border
+        g.fill(px,           py,           px + PANEL_W, py + PANEL_H, 0xF0111118);
+        g.fill(px,           py,           px + PANEL_W, py + 1,       0xFF444466);
+        g.fill(px,           py + PANEL_H - 1, px + PANEL_W, py + PANEL_H, 0xFF333355);
+        g.fill(px,           py,           px + 1,       py + PANEL_H, 0xFF444466);
+        g.fill(px + PANEL_W - 1, py,       px + PANEL_W, py + PANEL_H, 0xFF444466);
+        // Orange accent stripe
+        g.fill(px + 1, py + 1, px + PANEL_W - 1, py + 3, 0xFFFF8C00);
 
-        // panel bg
-        g.fill(panelX,         panelY,         panelX + panelW, panelY + panelH, 0xFF111118);
-        // border
-        g.fill(panelX,         panelY,         panelX + panelW, panelY + 1,      0xFF444466);
-        g.fill(panelX,         panelY + panelH - 1, panelX + panelW, panelY + panelH, 0xFF333355);
-        g.fill(panelX,         panelY,         panelX + 1,      panelY + panelH, 0xFF444466);
-        g.fill(panelX + panelW - 1, panelY,   panelX + panelW, panelY + panelH, 0xFF444466);
-        // top accent line
-        g.fill(panelX + 1, panelY + 1, panelX + panelW - 1, panelY + 3, 0xFFFF8C00);
+        // Title
+        g.drawCenteredString(font, this.title, cx, py + 8, 0xFFFFFF);
 
-        // ── Title ─────────────────────────────────────────────────────────────
-        g.drawCenteredString(font, this.title, cx, cy - 63, 0xFFFFFF);
-
-        // ── Syntax guide ──────────────────────────────────────────────────────
-        int lineY = cy - 50;
+        // Description
         g.drawCenteredString(font,
-                "Enter item or mod IDs you want to look like normal Minecraft.",
-                cx, lineY, 0xAAAAAA);
-        lineY += 10;
-        g.drawCenteredString(font,
-                "This turns off Punchy animations for them.",
-                cx, lineY, 0x888888);
-        lineY += 14;
-        drawSyntaxLine(g, cx, lineY,      "modid:item_id",  "→  one specific item");
-        drawSyntaxLine(g, cx, lineY + 10, "modid",          "→  all items from that mod");
-        drawSyntaxLine(g, cx, lineY + 20, "modid:*_sword",  "→  wildcard (glob)");
-        drawSyntaxLine(g, cx, lineY + 30, "modid:.*axe",    "→  raw regex");
+                "Enter items or mods to disable Punchy animations for.",
+                cx, py + 24, 0xAAAAAA);
 
-        // ── Widgets on top ────────────────────────────────────────────────────
+        // Syntax reference
+        int lineY = py + 42;
+        int labelX = cx - 100;
+        int descX  = cx - 14;
+        drawSyntaxLine(g, labelX, descX, lineY,      "modid:item_id",  "exact item");
+        drawSyntaxLine(g, labelX, descX, lineY + 12, "modid",          "whole mod");
+        drawSyntaxLine(g, labelX, descX, lineY + 24, "modid:*_sword",  "glob wildcard");
+        drawSyntaxLine(g, labelX, descX, lineY + 36, "*_leggings",     "any mod, path glob");
+        drawSyntaxLine(g, labelX, descX, lineY + 48, "modid:.*axe",    "raw regex");
+
+        // Divider above input
+        g.fill(px + PANEL_PAD, py + 92, px + PANEL_W - PANEL_PAD, py + 93, 0x44FFFFFF);
+
         super.render(g, mouseX, mouseY, partial);
     }
 
-    private void drawSyntaxLine(GuiGraphics g, int cx, int y, String pattern, String desc) {
-        int patW = font.width(pattern);
-        g.drawString(font, pattern, cx - 90,           y, 0x88FFCC44, false);
-        g.drawString(font, desc,    cx - 90 + patW + 4, y, 0x666666,  false);
+    private void drawSyntaxLine(GuiGraphics g, int labelX, int descX, int y,
+                                String pattern, String desc) {
+        g.drawString(font, pattern, labelX,        y, 0xFFCC44, false);
+        g.drawString(font, "→",     descX - 10,    y, 0x555555, false);
+        g.drawString(font, desc,    descX + 2,     y, 0x888888, false);
     }
+
+    @Override
+    public boolean shouldCloseOnEsc() { return true; }
 }

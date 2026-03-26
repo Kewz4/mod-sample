@@ -15,15 +15,6 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.*;
 
-/**
- * Two-column item-grid config screen.
- *
- * Z-order (back → front):
- *   1. renderBackground() — standard MC background (blur cancelled by MixinGameRenderer)
- *   2. Panel strips / item renders
- *   3. super.render()     — Button + EditBox widgets
- *   4. Item tooltip        — drawn absolutely last
- */
 public class PunchyConfigScreen extends Screen {
 
     // ── Sort mode ─────────────────────────────────────────────────────────────
@@ -34,9 +25,16 @@ public class PunchyConfigScreen extends Screen {
     }
     private SortMode sortMode = SortMode.NAME;
 
+    // ── Display rows (items + separators) ─────────────────────────────────────
+    /** A separator header row (spans full column width). */
+    private record Sep(String label) {}
+    /** A row of up to cols() item cells. */
+    private record ItemRow(List<ItemFetcher.ItemInfo> cells) {}
+
     // ── Layout constants ──────────────────────────────────────────────────────
     private static final int CELL        = 20;
-    private static final int SCROLLBAR_W = 3;
+    private static final int SEP_H       = 13;   // separator row height (< CELL keeps grid aligned)
+    private static final int SCROLLBAR_W = 4;
     private static final int GAP         = 6;
     private static final int PAD         = 4;
 
@@ -45,10 +43,10 @@ public class PunchyConfigScreen extends Screen {
     private static final int SORT_COUNT  = SortMode.values().length;
     private static final int SORT_AREA_W = SORT_COUNT * SORT_BTN_W + (SORT_COUNT - 1) * 2 + PAD;
 
-    private static final int HEADER_H    = 46;
-    private static final int RULES_H     = 18;
-    private static final int COL_HDR_H   = 13;
-    private static final int FOOTER_H    = 30;
+    private static final int HEADER_H  = 46;
+    private static final int RULES_H   = 18;
+    private static final int COL_HDR_H = 13;
+    private static final int FOOTER_H  = 30;
 
     // ── State ─────────────────────────────────────────────────────────────────
     private final Screen parent;
@@ -56,7 +54,11 @@ public class PunchyConfigScreen extends Screen {
     private final List<ItemFetcher.ItemInfo> enabledItems  = new ArrayList<>();
     private final List<ItemFetcher.ItemInfo> disabledItems = new ArrayList<>();
 
-    /** Items whose renderers crash — skipped to avoid exceptions every frame. */
+    /** Flat display lists — each entry is either Sep or ItemRow. */
+    private List<Object> enabledRows  = List.of();
+    private List<Object> disabledRows = List.of();
+
+    /** Items that threw during renderItem — skip to avoid per-frame exceptions. */
     private final Set<String> brokenItems = new HashSet<>();
 
     private EditBox searchBox;
@@ -72,8 +74,6 @@ public class PunchyConfigScreen extends Screen {
         super(Component.literal("Punchy – Item Blacklist"));
         this.parent = parent;
     }
-
-    // ── Background ────────────────────────────────────────────────────────────
 
     @Override
     public void renderBackground(GuiGraphics g, int mx, int my, float partial) {
@@ -95,9 +95,8 @@ public class PunchyConfigScreen extends Screen {
         searchBox.setResponder(t -> refresh());
         this.addRenderableWidget(searchBox);
 
-        // ── Footer buttons ────────────────────────────────────────────────────
         int footY = this.height - FOOTER_H + (FOOTER_H - 20) / 2;
-        int x     = PAD;
+        int x = PAD;
 
         this.addRenderableWidget(
                 Button.builder(Component.literal("Add Rule / Regex"), btn ->
@@ -108,44 +107,47 @@ public class PunchyConfigScreen extends Screen {
                                 refresh();
                             }
                         })))
-                        .bounds(x, footY, 118, 20)
-                        .build());
+                        .bounds(x, footY, 118, 20).build());
         x += 122;
 
         this.addRenderableWidget(
                 Button.builder(Component.literal("Add All"), btn -> addAll())
-                        .bounds(x, footY, 58, 20)
-                        .build());
+                        .bounds(x, footY, 58, 20).build());
         x += 62;
 
         this.addRenderableWidget(
                 Button.builder(Component.literal("Remove All"), btn -> removeAll())
-                        .bounds(x, footY, 72, 20)
-                        .build());
-        x += 76;
+                        .bounds(x, footY, 74, 20).build());
+        x += 78;
 
         this.addRenderableWidget(
                 Button.builder(Component.literal("View Rules"), btn ->
                         this.minecraft.setScreen(new PunchyRulesScreen(this)))
-                        .bounds(x, footY, 68, 20)
-                        .build());
+                        .bounds(x, footY, 68, 20).build());
 
         this.addRenderableWidget(
                 Button.builder(CommonComponents.GUI_DONE, btn ->
                         this.minecraft.setScreen(this.parent))
-                        .bounds(this.width - 104, footY, 100, 20)
-                        .build());
+                        .bounds(this.width - 104, footY, 100, 20).build());
 
         refresh();
     }
 
     // ── Button actions ────────────────────────────────────────────────────────
 
+    /**
+     * Adds one {@code namespace:.*} wildcard per mod in the enabled column instead
+     * of thousands of individual item IDs (which would tank FPS in the chip row).
+     */
     private void addAll() {
-        List<String> bl = PunchyConfig.instance.itemBlacklist;
+        LinkedHashSet<String> namespaces = new LinkedHashSet<>();
         for (ItemFetcher.ItemInfo info : enabledItems) {
-            String id = info.id().toString();
-            if (!bl.contains(id)) bl.add(id);
+            namespaces.add(info.id().getNamespace());
+        }
+        List<String> bl = PunchyConfig.instance.itemBlacklist;
+        for (String ns : namespaces) {
+            String pat = ns + ":.*";   // raw regex → passthrough in entryToRegex
+            if (!bl.contains(pat)) bl.add(pat);
         }
         PunchyConfig.instance.save();
         refresh();
@@ -157,7 +159,7 @@ public class PunchyConfigScreen extends Screen {
         refresh();
     }
 
-    // ── Sorting + refresh ─────────────────────────────────────────────────────
+    // ── Sort + grouping ───────────────────────────────────────────────────────
 
     private Comparator<ItemFetcher.ItemInfo> makeComparator() {
         return switch (sortMode) {
@@ -182,15 +184,40 @@ public class PunchyConfigScreen extends Screen {
                 || p.endsWith("_wall") || p.endsWith("_planks") || p.endsWith("_log")
                 || p.endsWith("_bricks") || p.endsWith("_tile"))
             return "3_blocks";
-        if (p.endsWith("_ore"))    return "4_ores";
+        if (p.endsWith("_ore"))  return "4_ores";
         if (p.endsWith("_ingot") || p.endsWith("_nugget")
-                || p.endsWith("_dust") || p.endsWith("_crystal"))
-            return "5_materials";
+                || p.endsWith("_dust") || p.endsWith("_crystal")) return "5_materials";
         if (p.endsWith("_seeds") || p.endsWith("_sapling") || p.endsWith("_flower")
-                || p.endsWith("_mushroom") || p.endsWith("_crop"))
-            return "6_plants";
+                || p.endsWith("_mushroom") || p.endsWith("_crop")) return "6_plants";
         return "9_misc";
     }
+
+    private String groupKey(ItemFetcher.ItemInfo info) {
+        return switch (sortMode) {
+            case MOD  -> info.id().getNamespace();
+            case NAME -> String.valueOf(info.id().getPath().charAt(0)).toUpperCase();
+            case TAG  -> itemCategory(info);
+        };
+    }
+
+    private String groupLabel(String key) {
+        return switch (sortMode) {
+            case MOD  -> key;
+            case NAME -> key;
+            case TAG  -> switch (key) {
+                case "0_weapons"   -> "⚔ Weapons";
+                case "1_tools"     -> "⛏ Tools";
+                case "2_armor"     -> "🛡 Armor";
+                case "3_blocks"    -> "🧱 Blocks";
+                case "4_ores"      -> "⛏ Ores";
+                case "5_materials" -> "✦ Materials";
+                case "6_plants"    -> "🌿 Plants";
+                default            -> "● Misc";
+            };
+        };
+    }
+
+    // ── Refresh / build display ───────────────────────────────────────────────
 
     private void refresh() {
         enabledItems.clear();
@@ -218,6 +245,44 @@ public class PunchyConfigScreen extends Screen {
         Comparator<ItemFetcher.ItemInfo> cmp = makeComparator();
         enabledItems.sort(cmp);
         disabledItems.sort(cmp);
+        buildDisplay();
+    }
+
+    /**
+     * Converts sorted item lists into flat display-row lists.
+     * Each entry is either a {@link Sep} (full-width separator header)
+     * or an {@link ItemRow} (up to {@link #cols()} cells).
+     * Must be called after width is known and after sort.
+     */
+    private void buildDisplay() {
+        enabledRows  = buildRows(enabledItems);
+        disabledRows = buildRows(disabledItems);
+    }
+
+    private List<Object> buildRows(List<ItemFetcher.ItemInfo> items) {
+        if (this.width == 0) return List.of();
+        int nCols = cols();
+        List<Object> rows = new ArrayList<>();
+        String lastGroup = null;
+        List<ItemFetcher.ItemInfo> pending = new ArrayList<>();
+
+        for (ItemFetcher.ItemInfo info : items) {
+            String g = groupKey(info);
+            if (!g.equals(lastGroup)) {
+                if (!pending.isEmpty()) { flushCells(pending, nCols, rows); pending.clear(); }
+                rows.add(new Sep(groupLabel(g)));
+                lastGroup = g;
+            }
+            pending.add(info);
+        }
+        if (!pending.isEmpty()) flushCells(pending, nCols, rows);
+        return rows;
+    }
+
+    private void flushCells(List<ItemFetcher.ItemInfo> cells, int nCols, List<Object> rows) {
+        for (int i = 0; i < cells.size(); i += nCols) {
+            rows.add(new ItemRow(new ArrayList<>(cells.subList(i, Math.min(i + nCols, cells.size())))));
+        }
     }
 
     // ── Layout helpers ────────────────────────────────────────────────────────
@@ -227,10 +292,16 @@ public class PunchyConfigScreen extends Screen {
     private int rightX()  { return leftX() + colW() + GAP; }
     private int gridTop() { return HEADER_H + RULES_H + COL_HDR_H; }
     private int gridH()   { return this.height - gridTop() - FOOTER_H; }
-    private int cols()    { return Math.max(1, (colW() - SCROLLBAR_W - 1) / CELL); }
-    private int contentH(int count) {
-        int c = cols();
-        return c == 0 ? 0 : ((count + c - 1) / c) * CELL;
+    private int cols()    { return Math.max(1, (colW() - SCROLLBAR_W - 2) / CELL); }
+
+    private int rowHeight(Object row) {
+        return (row instanceof Sep) ? SEP_H : CELL;
+    }
+
+    private int contentH(List<Object> rows) {
+        int h = 0;
+        for (Object row : rows) h += rowHeight(row);
+        return h;
     }
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -246,8 +317,8 @@ public class PunchyConfigScreen extends Screen {
         drawHeader(g);
         drawRulesAndSortRow(g, mx, my);
         drawColumnHeaders(g);
-        drawGrid(g, mx, my, enabledItems,  leftX(),  enabledScroll,  false);
-        drawGrid(g, mx, my, disabledItems, rightX(), disabledScroll, true);
+        drawGrid(g, mx, my, enabledRows,  leftX(),  enabledScroll,  false);
+        drawGrid(g, mx, my, disabledRows, rightX(), disabledScroll, true);
 
         super.render(g, mx, my, partial);
 
@@ -260,8 +331,6 @@ public class PunchyConfigScreen extends Screen {
         }
     }
 
-    // ── Panel strips ──────────────────────────────────────────────────────────
-
     private void drawPanels(GuiGraphics g) {
         g.fill(0, HEADER_H, this.width, HEADER_H + RULES_H, 0x40FFFFFF);
         int chY = HEADER_H + RULES_H;
@@ -269,8 +338,6 @@ public class PunchyConfigScreen extends Screen {
         int sepX = leftX() + colW() + GAP / 2;
         g.fill(sepX, HEADER_H, sepX + 1, this.height - FOOTER_H, 0x55FFFFFF);
     }
-
-    // ── Header ────────────────────────────────────────────────────────────────
 
     private void drawHeader(GuiGraphics g) {
         int cx = this.width / 2;
@@ -281,23 +348,19 @@ public class PunchyConfigScreen extends Screen {
         g.drawString(font, "Search:", PAD, HEADER_H - 11, 0xAAAAAA, false);
     }
 
-    // ── Rules chips + sort buttons ────────────────────────────────────────────
-
     private void drawRulesAndSortRow(GuiGraphics g, int mx, int my) {
         int rowY = HEADER_H;
         int rowH = RULES_H;
-
         int chipsRight = this.width - SORT_AREA_W;
-        g.enableScissor(0, rowY, chipsRight, rowY + rowH);
 
+        g.enableScissor(0, rowY, chipsRight, rowY + rowH);
         List<String> rules = PunchyConfig.instance.itemBlacklist;
         if (rules.isEmpty()) {
-            g.drawString(font, "No rules active – use 'Add Rule / Regex' below.",
+            g.drawString(font, "No rules – use 'Add Rule / Regex' below.",
                     PAD, rowY + (rowH - font.lineHeight) / 2, 0x555555, false);
         } else {
             int x  = PAD;
-            int cy = rowY + 1;
-            int ch = rowH - 2;
+            int cy = rowY + 1, ch = rowH - 2;
             for (String rule : rules) {
                 int chipW = font.width(rule) + 20;
                 g.fill(x, cy, x + chipW, cy + ch, 0xAA222222);
@@ -309,20 +372,17 @@ public class PunchyConfigScreen extends Screen {
                 x += chipW + 3;
             }
         }
-
         g.disableScissor();
 
         SortMode[] modes = SortMode.values();
         int btnY  = rowY + (rowH - SORT_BTN_H) / 2;
         int btnX0 = this.width - SORT_AREA_W + PAD / 2;
-
         for (int i = 0; i < modes.length; i++) {
             SortMode mode   = modes[i];
             int      btnX   = btnX0 + i * (SORT_BTN_W + 2);
             boolean  active = sortMode == mode;
             boolean  hov    = mx >= btnX && mx < btnX + SORT_BTN_W
                            && my >= btnY && my < btnY + SORT_BTN_H;
-
             int bg     = active ? 0xFF224422 : (hov ? 0x44FFFFFF : 0x22FFFFFF);
             int border = active ? 0xFF55AA55 : 0x44888888;
             g.fill(btnX, btnY, btnX + SORT_BTN_W, btnY + SORT_BTN_H, bg);
@@ -330,85 +390,96 @@ public class PunchyConfigScreen extends Screen {
             g.fill(btnX,                   btnY + SORT_BTN_H - 1,  btnX + SORT_BTN_W, btnY + SORT_BTN_H, border);
             g.fill(btnX,                   btnY,                   btnX + 1,           btnY + SORT_BTN_H, border);
             g.fill(btnX + SORT_BTN_W - 1, btnY,                   btnX + SORT_BTN_W, btnY + SORT_BTN_H, border);
-            int labelColor = active ? 0xFF88FF88 : (hov ? 0xFFCCCCCC : 0xFF888888);
+            int lc = active ? 0xFF88FF88 : (hov ? 0xFFCCCCCC : 0xFF888888);
             g.drawCenteredString(font, mode.label,
-                    btnX + SORT_BTN_W / 2, btnY + (SORT_BTN_H - font.lineHeight) / 2, labelColor);
+                    btnX + SORT_BTN_W / 2, btnY + (SORT_BTN_H - font.lineHeight) / 2, lc);
         }
     }
 
-    // ── Column headers ────────────────────────────────────────────────────────
-
     private void drawColumnHeaders(GuiGraphics g) {
-        int y         = HEADER_H + RULES_H;
-        String sortLbl = " [" + sortMode.label + "]";
-        g.drawCenteredString(font, "✓ Enabled (" + enabledItems.size() + ")" + sortLbl,
+        int y = HEADER_H + RULES_H;
+        String sl = " [" + sortMode.label + "]";
+        g.drawCenteredString(font, "✓ Enabled (" + enabledItems.size() + ")" + sl,
                 leftX() + colW() / 2, y + 2, 0x55FF55);
-        g.drawCenteredString(font, "✗ Disabled (" + disabledItems.size() + ")" + sortLbl,
+        g.drawCenteredString(font, "✗ Disabled (" + disabledItems.size() + ")" + sl,
                 rightX() + colW() / 2, y + 2, 0xFF5555);
     }
 
-    // ── Item grids ────────────────────────────────────────────────────────────
+    // ── Item grid ─────────────────────────────────────────────────────────────
 
     private void drawGrid(GuiGraphics g, int mx, int my,
-                          List<ItemFetcher.ItemInfo> items,
-                          int colX, int scroll, boolean isDisabled) {
-        int gTop  = gridTop();
-        int gH    = gridH();
-        int nCols = cols();
+                          List<Object> rows, int colX, int scroll, boolean isDisabled) {
+        int gTop = gridTop();
+        int gH   = gridH();
 
         g.enableScissor(colX, gTop, colX + colW(), gTop + gH);
 
-        if (items.isEmpty()) {
+        if (rows.isEmpty()) {
             g.drawCenteredString(font,
                     isDisabled ? "No disabled items" : "No enabled items",
                     colX + colW() / 2, gTop + gH / 2 - 4, 0x444444);
         } else {
-            // Only iterate rows that are actually visible — avoids O(n) over all items
-            int firstRow = scroll / CELL;
-            int lastRow  = (scroll + gH + CELL - 1) / CELL;
-
-            for (int row = firstRow; row <= lastRow; row++) {
-                for (int col = 0; col < nCols; col++) {
-                    int i = row * nCols + col;
-                    if (i >= items.size()) break;
-
-                    ItemFetcher.ItemInfo info = items.get(i);
-                    int x = colX + col * CELL;
-                    int y = gTop - scroll + row * CELL;
-
-                    ItemStack stack = new ItemStack(info.item());
-
-                    boolean hovered = mx >= x && mx < x + CELL
-                                   && my >= y && my < y + CELL
-                                   && my >= gTop && my < gTop + gH;
-
-                    if (hovered) {
-                        g.fill(x, y, x + CELL, y + CELL, 0x55FFFFFF);
-                        pendingTooltipStack = stack;
-                        pendingTooltipId    = info.id().toString();
-                    } else if (isDisabled) {
-                        g.fill(x, y, x + CELL, y + CELL, 0x33FF2222);
-                    }
-
-                    String itemId = info.id().toString();
-                    if (!brokenItems.contains(itemId)) {
-                        try {
-                            g.renderItem(stack, x + 2, y + 2);
-                        } catch (Exception e) {
-                            // Cache so we never try (and throw) this item again.
-                            // Also reset any rendering state the failed render may have dirtied.
-                            brokenItems.add(itemId);
-                            RenderSystem.enableDepthTest();
-                            RenderSystem.enableBlend();
-                            RenderSystem.defaultBlendFunc();
-                        }
+            // Walk rows, skip those entirely above/below viewport
+            int y = gTop - scroll;
+            for (Object row : rows) {
+                int rh = rowHeight(row);
+                if (y + rh > gTop && y < gTop + gH) {
+                    if (row instanceof Sep sep) {
+                        drawSepRow(g, colX, y, sep.label());
+                    } else if (row instanceof ItemRow itemRow) {
+                        drawItemRow(g, mx, my, colX, y, gTop, gH, itemRow, isDisabled);
                     }
                 }
+                y += rh;
+                if (y >= gTop + gH) break;
             }
         }
 
         g.disableScissor();
-        drawScrollbar(g, colX + colW() - SCROLLBAR_W, gTop, gH, scroll, contentH(items.size()));
+        drawScrollbar(g, colX + colW() - SCROLLBAR_W, gTop, gH,
+                      scroll, contentH(rows));
+    }
+
+    private void drawSepRow(GuiGraphics g, int colX, int y, String label) {
+        g.fill(colX, y, colX + colW() - SCROLLBAR_W - 2, y + SEP_H, 0x55000000);
+        g.fill(colX, y + SEP_H - 1, colX + colW() - SCROLLBAR_W - 2, y + SEP_H, 0x44FFFFFF);
+        g.drawString(font, label, colX + 3, y + (SEP_H - font.lineHeight) / 2, 0xCCCCCC, false);
+    }
+
+    private void drawItemRow(GuiGraphics g, int mx, int my,
+                             int colX, int y, int gTop, int gH,
+                             ItemRow row, boolean isDisabled) {
+        List<ItemFetcher.ItemInfo> cells = row.cells();
+        for (int col = 0; col < cells.size(); col++) {
+            int x = colX + col * CELL;
+
+            ItemFetcher.ItemInfo info  = cells.get(col);
+            ItemStack            stack = new ItemStack(info.item());
+
+            boolean hovered = mx >= x && mx < x + CELL
+                           && my >= y && my < y + CELL
+                           && my >= gTop && my < gTop + gH;
+
+            if (hovered) {
+                g.fill(x, y, x + CELL, y + CELL, 0x55FFFFFF);
+                pendingTooltipStack = stack;
+                pendingTooltipId    = info.id().toString();
+            } else if (isDisabled) {
+                g.fill(x, y, x + CELL, y + CELL, 0x33FF2222);
+            }
+
+            String itemId = info.id().toString();
+            if (!brokenItems.contains(itemId)) {
+                try {
+                    g.renderItem(stack, x + 2, y + 2);
+                } catch (Exception e) {
+                    brokenItems.add(itemId);
+                    RenderSystem.enableDepthTest();
+                    RenderSystem.enableBlend();
+                    RenderSystem.defaultBlendFunc();
+                }
+            }
+        }
     }
 
     private void drawScrollbar(GuiGraphics g, int x, int y, int h, int scroll, int totalH) {
@@ -432,16 +503,16 @@ public class PunchyConfigScreen extends Screen {
 
         if (my >= gTop && my < gTop + gH) {
             if (mx >= leftX() && mx < leftX() + colW())
-                enabledScroll  = clampScroll(enabledScroll  + delta, enabledItems.size(),  gH);
+                enabledScroll  = clampScroll(enabledScroll  + delta, enabledRows,  gH);
             else if (mx >= rightX() && mx < rightX() + colW())
-                disabledScroll = clampScroll(disabledScroll + delta, disabledItems.size(), gH);
+                disabledScroll = clampScroll(disabledScroll + delta, disabledRows, gH);
             return true;
         }
         return false;
     }
 
-    private int clampScroll(int v, int count, int h) {
-        return Math.max(0, Math.min(v, Math.max(0, contentH(count) - h)));
+    private int clampScroll(int v, List<Object> rows, int h) {
+        return Math.max(0, Math.min(v, Math.max(0, contentH(rows) - h)));
     }
 
     @Override
@@ -449,7 +520,7 @@ public class PunchyConfigScreen extends Screen {
         if (super.mouseClicked(mx, my, btn)) return true;
         if (btn != 0) return false;
 
-        // Sort buttons + chip × buttons in rules row
+        // Sort buttons + chip × in rules row
         if (my >= HEADER_H && my < HEADER_H + RULES_H) {
             int btnY  = HEADER_H + (RULES_H - SORT_BTN_H) / 2;
             int btnX0 = this.width - SORT_AREA_W + PAD / 2;
@@ -462,7 +533,6 @@ public class PunchyConfigScreen extends Screen {
                     return true;
                 }
             }
-
             int chipsRight = this.width - SORT_AREA_W;
             if (mx < chipsRight) {
                 int x  = PAD;
@@ -483,31 +553,42 @@ public class PunchyConfigScreen extends Screen {
             }
         }
 
-        // Grid item clicks
-        int gTop = gridTop();
-        int gH   = gridH();
+        // Grid item clicks — exclude scrollbar area (last SCROLLBAR_W px of each column)
+        int gTop    = gridTop();
+        int gH      = gridH();
+        int clickableW = colW() - SCROLLBAR_W - 2;
         if (my >= gTop && my < gTop + gH) {
-            if (mx >= leftX()  && mx < leftX()  + colW()) { clickGridItem((int) mx, (int) my, leftX(),  enabledScroll,  enabledItems);  return true; }
-            if (mx >= rightX() && mx < rightX() + colW()) { clickGridItem((int) mx, (int) my, rightX(), disabledScroll, disabledItems); return true; }
+            if (mx >= leftX() && mx < leftX() + clickableW)
+                return clickRow((int) mx, (int) my, leftX(),  enabledScroll,  enabledRows,  false);
+            if (mx >= rightX() && mx < rightX() + clickableW)
+                return clickRow((int) mx, (int) my, rightX(), disabledScroll, disabledRows, true);
         }
         return false;
     }
 
-    private void clickGridItem(int mx, int my, int colX, int scroll,
-                                List<ItemFetcher.ItemInfo> items) {
-        int nCols = cols();
-        int col   = (mx - colX) / CELL;
-        int row   = (my - gridTop() + scroll) / CELL;
-        int idx   = row * nCols + col;
-        if (idx < 0 || idx >= items.size()) return;
-
-        String id = items.get(idx).id().toString();
-        List<String> bl = PunchyConfig.instance.itemBlacklist;
-        if (bl.contains(id)) bl.remove(id);
-        else                  bl.add(id);
-
-        PunchyConfig.instance.save();
-        refresh();
+    private boolean clickRow(int mx, int my, int colX, int scroll,
+                              List<Object> rows, boolean isDisabled) {
+        int gTop   = gridTop();
+        int targetY = my - gTop + scroll;  // Y within content
+        int y = 0;
+        for (Object row : rows) {
+            int rh = rowHeight(row);
+            if (targetY >= y && targetY < y + rh) {
+                if (row instanceof Sep) return true;  // clicked separator — no action
+                if (row instanceof ItemRow itemRow) {
+                    int col = (mx - colX) / CELL;
+                    if (col < 0 || col >= itemRow.cells().size()) return true;
+                    String id = itemRow.cells().get(col).id().toString();
+                    List<String> bl = PunchyConfig.instance.itemBlacklist;
+                    if (bl.contains(id)) bl.remove(id); else bl.add(id);
+                    PunchyConfig.instance.save();
+                    refresh();
+                    return true;
+                }
+            }
+            y += rh;
+        }
+        return false;
     }
 
     @Override

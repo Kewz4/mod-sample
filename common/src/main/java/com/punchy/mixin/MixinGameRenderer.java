@@ -2,6 +2,7 @@ package com.punchy.mixin;
 
 import com.punchy.client.PunchyConfigScreen;
 import com.punchy.client.PunchyRegexInputScreen;
+import com.punchy.client.PunchyRulesScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import org.spongepowered.asm.mixin.Mixin;
@@ -23,7 +24,8 @@ public class MixinGameRenderer {
     private void punchy$cancelBlur(float partialTick, CallbackInfo ci) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.screen instanceof PunchyConfigScreen
-                || mc.screen instanceof PunchyRegexInputScreen) {
+                || mc.screen instanceof PunchyRegexInputScreen
+                || mc.screen instanceof PunchyRulesScreen) {
             ci.cancel();
         }
     }

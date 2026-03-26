@@ -113,18 +113,28 @@ public class PunchyConfig {
     }
 
     private static String entryToRegex(String entry) {
-        // Raw regex — user explicitly wrote .*  or  other regex syntax
-        if (entry.contains(".*")) {
-            return entry;
+        // Raw regex passthrough — user wrote .* or explicit regex syntax
+        if (entry.contains(".*")) return entry;
+
+        if (!entry.contains(":")) {
+            if (entry.contains("*")) {
+                // Path-only glob like *_leggings → matches any namespace:path_ending
+                return "^[^:]++:" + globToRegex(entry) + "$";
+            } else {
+                // Plain mod ID like "cobblemon" → match all items from that mod
+                return "^" + globToRegex(entry) + ":.*$";
+            }
         }
 
-        // No colon → treat as mod ID → match all items
-        String pattern = entry.contains(":") ? entry : entry + ":.*";
+        // Has colon — split namespace:path and glob-convert each part separately
+        int colon = entry.indexOf(':');
+        return "^" + globToRegex(entry.substring(0, colon))
+                   + ":" + globToRegex(entry.substring(colon + 1)) + "$";
+    }
 
-        // Glob → regex: escape special chars, convert * to .*
-        StringBuilder sb = new StringBuilder("^");
-        for (int i = 0; i < pattern.length(); i++) {
-            char c = pattern.charAt(i);
+    private static String globToRegex(String glob) {
+        StringBuilder sb = new StringBuilder();
+        for (char c : glob.toCharArray()) {
             switch (c) {
                 case '*'  -> sb.append(".*");
                 case '.'  -> sb.append("\\.");
@@ -143,7 +153,6 @@ public class PunchyConfig {
                 default   -> sb.append(c);
             }
         }
-        sb.append("$");
         return sb.toString();
     }
 
