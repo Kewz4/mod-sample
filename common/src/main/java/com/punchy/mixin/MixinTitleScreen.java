@@ -1,7 +1,7 @@
 package com.punchy.mixin;
 
 import com.punchy.UpdateChecker;
-import com.punchy.client.PunchyUpdateToast;
+import com.punchy.client.PunchyUpdateScreen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.client.gui.components.Button;
@@ -19,55 +19,56 @@ import java.net.URI;
 @Mixin(TitleScreen.class)
 public abstract class MixinTitleScreen extends net.minecraft.client.gui.screens.Screen {
 
-    /** Tracks whether we have already added the update button this session. */
-    @Unique
-    private boolean punchy$updateWidgetsAdded = false;
+    protected MixinTitleScreen(Component title) { super(title); }
 
-    protected MixinTitleScreen(Component title) {
-        super(title);
-    }
-
-    // ── Detect loader + kick off the async check when the title screen inits ─
+    // ── Kick off async check + add button when already known ──────────────────
 
     @Inject(method = "init", at = @At("RETURN"))
     private void punchy$onInit(CallbackInfo ci) {
-        String loader = detectLoader();
-        UpdateChecker.checkForUpdates(loader);
+        // Always reset so the button is re-added after returning from popup / world
+        punchy$buttonAdded = false;
 
-        // If update was already known when we inited (e.g. returning from a world),
-        // add the widgets immediately instead of waiting for the next tick.
-        if (UpdateChecker.updateAvailable && !punchy$updateWidgetsAdded) {
-            punchy$addUpdateWidgets();
+        UpdateChecker.checkForUpdates(detectLoader());
+
+        if (UpdateChecker.updateAvailable) {
+            punchy$addUpdateButton();
         }
     }
 
-    // ── Tick: handles the common case where the async check finishes AFTER init ─
+    // ── Tick: handles async check finishing after init ─────────────────────────
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void punchy$onTick(CallbackInfo ci) {
-        if (UpdateChecker.updateAvailable && !punchy$updateWidgetsAdded) {
-            punchy$addUpdateWidgets();
+        if (UpdateChecker.updateAvailable && !punchy$buttonAdded) {
+            punchy$addUpdateButton();
+        }
+
+        // Show popup once – scheduled here so MC is fully ready
+        if (UpdateChecker.updateAvailable && !UpdateChecker.popupShown) {
+            UpdateChecker.popupShown = true;
+            this.minecraft.setScreen(new PunchyUpdateScreen(
+                    (TitleScreen)(Object) this,
+                    UpdateChecker.latestVersion,
+                    UpdateChecker.downloadUrl));
         }
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // ── Persistent "Update Available" button (top-right, always visible) ──────
+
+    @Unique private boolean punchy$buttonAdded = false;
 
     @Unique
-    private void punchy$addUpdateWidgets() {
-        punchy$updateWidgetsAdded = true;
+    private void punchy$addUpdateButton() {
+        punchy$buttonAdded = true;
 
-        // ── Persistent button (top-right corner) ─────────────────────────────
-        int btnWidth  = 160;
-        int btnHeight = 20;
-        int x = this.width - btnWidth - 5;
-        int y = 5;
+        int btnW = 160, btnH = 20;
+        int x = this.width - btnW - 5;
 
-        Component label = Component.literal("⬆ Update Available!")
+        Component label = Component.literal("\u2B06 Update Available!")
                 .withStyle(ChatFormatting.RED);
 
-        Component tooltip = Component.literal(
-                "A new version of Punchy is available: " + UpdateChecker.latestVersion
-                + "\nClick to download.");
+        Component tip = Component.literal(
+                "Punchy " + UpdateChecker.latestVersion + " is available.\nClick to open the download page.");
 
         this.addRenderableWidget(
                 Button.builder(label, btn -> {
@@ -75,18 +76,12 @@ public abstract class MixinTitleScreen extends net.minecraft.client.gui.screens.
                         Util.getPlatform().openUri(URI.create(UpdateChecker.downloadUrl));
                     }
                 })
-                .bounds(x, y, btnWidth, btnHeight)
-                .tooltip(Tooltip.create(tooltip))
-                .build()
-        );
-
-        // ── One-time custom toast notification ───────────────────────────────
-        if (!UpdateChecker.popupShown) {
-            UpdateChecker.popupShown = true;
-            this.minecraft.getToasts().addToast(
-                    new PunchyUpdateToast(UpdateChecker.latestVersion));
-        }
+                .bounds(x, 5, btnW, btnH)
+                .tooltip(Tooltip.create(tip))
+                .build());
     }
+
+    // ── Loader detection ──────────────────────────────────────────────────────
 
     @Unique
     private static String detectLoader() {
@@ -97,11 +92,7 @@ public abstract class MixinTitleScreen extends net.minecraft.client.gui.screens.
 
     @Unique
     private static boolean isClassPresent(String name) {
-        try {
-            Class.forName(name);
-            return true;
-        } catch (ClassNotFoundException e) {
-            return false;
-        }
+        try { Class.forName(name); return true; }
+        catch (ClassNotFoundException e) { return false; }
     }
 }

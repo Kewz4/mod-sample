@@ -83,7 +83,8 @@ public class PunchyConfigScreen extends Screen {
     @Override
     public void renderBackground(GuiGraphics g, int mx, int my, float partial) {
         super.renderBackground(g, mx, my, partial);
-        g.fill(0, 0, this.width, this.height, 0xCC0A0A0F);
+        // Lighter overlay – enough to make text crisp without making items invisible
+        g.fill(0, 0, this.width, this.height, 0x99080808);
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ public class PunchyConfigScreen extends Screen {
         // Search box: left-label + box that stops before the sort button area
         int labelW = this.font.width("Search: ");
         int sbX    = PAD + labelW + 2;
-        int sbW    = this.width - sbX - SORT_AREA_W - PAD;
+        int sbW    = Math.min(220, this.width - sbX - SORT_AREA_W - PAD);
         searchBox  = new EditBox(this.font, sbX, HEADER_H - 18, sbW, 16,
                 Component.literal("Search"));
         searchBox.setMaxLength(128);
@@ -373,8 +374,9 @@ public class PunchyConfigScreen extends Screen {
 
                 g.renderItem(stack, x + 2, y + 2);
 
+                // Subtle red tint only – no black overlay (too dark on dark backgrounds)
                 if (isDisabled && !hovered) {
-                    g.fill(x + 2, y + 2, x + CELL - 2, y + CELL - 2, 0x55000000);
+                    g.fill(x, y, x + CELL, y + CELL, 0x22FF2222);
                 }
             }
         }
