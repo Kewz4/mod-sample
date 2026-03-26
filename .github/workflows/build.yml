@@ -7,38 +7,32 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Java ────────────────────────────────────────────────────────────────
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
 
-      # ── Gradle cache ────────────────────────────────────────────────────────
-      - name: Cache Gradle packages
+      - name: Cache Gradle
         uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+          restore-keys: ${{ runner.os }}-gradle-
 
-      # ── Build ────────────────────────────────────────────────────────────────
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
+      - name: Build
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :fabric:build --no-daemon
 
-      - name: Build all loaders
-        run: ./gradlew build --no-daemon
-
-      # ── Upload artefacts (release JARs only, no -dev or -sources) ───────────
-      - name: Upload Fabric JAR
+      - name: Upload JAR
         uses: actions/upload-artifact@v4
         with:
           name: punchy-fabric-${{ github.sha }}
@@ -46,21 +40,3 @@ jobs:
             fabric/build/libs/*.jar
             !fabric/build/libs/*-dev.jar
             !fabric/build/libs/*-sources.jar
-
-      - name: Upload NeoForge JAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: punchy-neoforge-${{ github.sha }}
-          path: |
-            neoforge/build/libs/*.jar
-            !neoforge/build/libs/*-dev.jar
-            !neoforge/build/libs/*-sources.jar
-
-      - name: Upload Forge JAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: punchy-forge-${{ github.sha }}
-          path: |
-            forge/build/libs/*.jar
-            !forge/build/libs/*-dev.jar
-            !forge/build/libs/*-sources.jar

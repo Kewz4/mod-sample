@@ -4,20 +4,35 @@ plugins {
 }
 
 dependencies {
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    mappings loom.officialMojangMappings()
+    minecraft    "com.mojang:minecraft:${project.minecraft_version}"
+    mappings     loom.officialMojangMappings()
+
     modImplementation "net.fabricmc:fabric-loader:${project.fabric_loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
-
-    // ModMenu
     modImplementation "com.terraformersmc:modmenu:11.0.3"
 
-    implementation project(path: ':common', configuration: 'namedElements')
-    include project(':common')
+    // Gson is bundled with Minecraft — declare as compileOnly to avoid shadowing
+    compileOnly "com.google.code.gson:gson:2.10.1"
 }
 
 loom {
     mixin {
         defaultRefmapName = "punchy.refmap.json"
     }
+}
+
+base {
+    archivesName = "${project.mod_id}-fabric-${project.minecraft_version}"
+}
+
+processResources {
+    inputs.property "version", project.version
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+java {
+    withSourcesJar()
 }
