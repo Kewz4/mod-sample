@@ -77,9 +77,9 @@ public class PunchyConfigScreen extends Screen {
 
     @Override
     public void renderBackground(GuiGraphics g, int mx, int my, float partial) {
-        // Skip super.renderBackground() — that triggers the world blur.
-        // Use a solid opaque gradient so the screen has no transparency at all.
-        g.fillGradient(0, 0, this.width, this.height, 0xFF1E1E2E, 0xFF16162A);
+        // Use the standard MC background (dirt/panorama in main menu, world+overlay
+        // in-game). MixinGameRenderer cancels the blur shader so the world stays sharp.
+        super.renderBackground(g, mx, my, partial);
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
@@ -370,7 +370,12 @@ public class PunchyConfigScreen extends Screen {
                     g.fill(x, y, x + CELL, y + CELL, 0x44FF2222);
                 }
 
-                g.renderItem(stack, x + 2, y + 2);
+                try {
+                    g.renderItem(stack, x + 2, y + 2);
+                } catch (Exception ignored) {
+                    // Some mod items (e.g. Avaritia cosmic items) crash when rendered
+                    // outside of a world context — skip them silently.
+                }
 
                 // Red tint on top of item for disabled cells
                 if (isDisabled && !hovered) {
