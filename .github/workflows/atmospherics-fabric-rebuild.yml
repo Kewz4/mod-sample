@@ -35,7 +35,9 @@ jobs:
 
       - name: Compile and remap production JAR
         working-directory: .ci/atmospherics/work
-        run: gradle --no-daemon --stacktrace clean remapJar
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace clean remapJar 2>&1 | tee ../compile.log
 
       - name: Validate JAR structure and metadata
         working-directory: .ci/atmospherics/work
@@ -104,4 +106,29 @@ jobs:
             exit 0
           fi
           git commit -m "ci: publish rebuilt Atmospherics Fabric files [skip ci]"
+          git push origin HEAD:atmospherics-fabric-reupload
+
+      - name: Publish CI status and diagnostics
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p .ci/atmospherics/diagnostics
+          printf 'status=%s\ncommit=%s\n' "$JOB_STATUS" "$GITHUB_SHA" > .ci/atmospherics/ci-status.txt
+          if [ -f .ci/atmospherics/compile.log ]; then
+            cp .ci/atmospherics/compile.log .ci/atmospherics/diagnostics/compile.log
+          fi
+          if [ -f .ci/atmospherics/work/run/logs/latest.log ]; then
+            cp .ci/atmospherics/work/run/logs/latest.log .ci/atmospherics/diagnostics/latest.log
+          fi
+          if [ -f .ci/atmospherics/work/build/client-smoke-console.log ]; then
+            cp .ci/atmospherics/work/build/client-smoke-console.log .ci/atmospherics/diagnostics/client-smoke-console.log
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f .ci/atmospherics/ci-status.txt .ci/atmospherics/diagnostics
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "ci: publish Atmospherics build status [skip ci]"
           git push origin HEAD:atmospherics-fabric-reupload
