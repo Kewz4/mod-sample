@@ -1,0 +1,251 @@
+name: Atmospherics Fabric 1.21.1 Final Publish
+
+on:
+  push:
+    branches:
+      - atmospherics-fabric-reupload
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Generate final combined source
+        run: |
+          set -euo pipefail
+          python .ci/atmospherics/generate_port.py
+          W=.ci/atmospherics/work
+          F=.ci/atmospherics/rendering-fix-src
+          mkdir -p "$W/src/main/java/com/beash/atmospherics/mixin"
+          cp .ci/atmospherics/decompiled-mixins/*.java "$W/src/main/java/com/beash/atmospherics/mixin/"
+          cp -a "$F/com/." "$W/src/main/java/com/"
+          rm -rf "$W/src/main/resources/resourcepacks/atmospherics_pack"
+          mkdir -p "$W/src/main/resources/resourcepacks"
+          cp -a "$F/resourcepacks/atmospherics_pack" "$W/src/main/resources/resourcepacks/"
+          python "$F/apply_v3.py"
+          python "$F/apply_v4.py"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('.ci/atmospherics/work/src/main/resources/atmospherics.mixins.json')
+          d = json.loads(p.read_text())
+          destination = next((d[k] for k in ('client','mixins') if isinstance(d.get(k), list) and 'ShaderHazePassMixin' in d[k]), d.setdefault('client', []))
+          if 'ShaderCompatSmokeMixin' not in destination:
+              destination.append('ShaderCompatSmokeMixin')
+          d['refmap'] = 'atmospherics.refmap.json'
+          p.write_text(json.dumps(d, indent=2) + '\n')
+          PY
+          # Give llvmpipe/Iris ample time to compile a real shader pack.
+          find "$W/src/main/java" -name 'AtmosphericsFabricClient.java' -print0 | xargs -0 sed -i 's/>= 300/>= 600/g; s/after 300 client ticks/after 600 client ticks/g'
+          sed -i 's/< 250/< 500/g; s/after 250 client ticks/after 500 client ticks/g' "$W/src/main/java/com/beash/atmospherics/mixin/ShaderCompatSmokeMixin.java"
+          grep -R -F 'after 600 client ticks' "$W/src/main/java"
+
+      - name: Compile and remap
+        working-directory: .ci/atmospherics/work
+        run: gradle --no-daemon --stacktrace clean remapJar
+
+      - name: Validate production contents
+        working-directory: .ci/atmospherics/work
+        run: |
+          python validate.py
+          python - <<'PY'
+          import json, zipfile
+          from pathlib import Path
+          jar = Path('build/libs/atmospherics-2.6.5-fabric-1.21.1.jar')
+          with zipfile.ZipFile(jar) as z:
+              names = set(z.namelist())
+              must = {
+                  'atmospherics.refmap.json',
+                  'com/beash/atmospherics/mixin/AmbientFlowMixin.class',
+                  'com/beash/atmospherics/mixin/WorldRendererCloudMixin.class',
+                  'com/beash/atmospherics/mixin/ShaderHazePassMixin.class',
+                  'com/beash/atmospherics/compat/ShaderCompat.class',
+                  'resourcepacks/atmospherics_pack/assets/minecraft/shaders/core/rendertype_clouds.vsh',
+              }
+              missing = must - names
+              assert not missing, missing
+              assert not [n for n in names if n.endswith('textures/environment/sun.png') or n.endswith('textures/environment/moon_phases.png')]
+              assert any('particle_no_cutoff' in n for n in names)
+              refmap = z.read('atmospherics.refmap.json').decode()
+              assert 'getSkyFlashTime' in refmap or 'method_23789' in refmap
+              mod = json.loads(z.read('fabric.mod.json'))
+              assert mod['version'] == '2.6.5-fabric.2+smc-haze'
+              pack = json.loads(z.read('resourcepacks/atmospherics_pack/pack.mcmeta'))
+              assert pack['pack']['pack_format'] == 34
+          print('Final production content validation passed')
+          PY
+
+      - name: Install display libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libgl1
+
+      - name: Normal Fabric startup test
+        working-directory: .ci/atmospherics/work
+        run: |
+          set -o pipefail
+          rm -rf run/logs
+          timeout 600s xvfb-run -a gradle --no-daemon --stacktrace runClient 2>&1 | tee build/final-normal.log
+          grep -F 'Atmospherics Fabric smoke test completed after 600 client ticks' run/logs/latest.log
+          ! grep -E 'MixinApplyError|InvalidInjectionException|MixinTransformerError' run/logs/latest.log
+
+      - name: Prepare Iris runtime test
+        id: iris_prepare
+        continue-on-error: true
+        working-directory: .ci/atmospherics/work
+        run: |
+          python - <<'PY'
+          import json, urllib.parse, urllib.request
+          from pathlib import Path
+          API='https://api.modrinth.com/v2'
+          H={'User-Agent':'Kewz4/Atmospherics-Fabric-final-test'}
+          def get(url):
+              with urllib.request.urlopen(urllib.request.Request(url,headers=H),timeout=90) as r: return json.load(r)
+          def versions(project, loader=True):
+              q={'game_versions':json.dumps(['1.21.1'])}
+              if loader: q['loaders']=json.dumps(['fabric'])
+              return get(f'{API}/project/{project}/version?'+urllib.parse.urlencode(q))
+          mods=Path('run/mods'); mods.mkdir(parents=True,exist_ok=True)
+          for p in mods.glob('*'): p.unlink()
+          seen=set()
+          def install(v):
+              if v['id'] in seen: return
+              seen.add(v['id'])
+              project=get(f"{API}/project/{v['project_id']}")
+              if project.get('slug')!='fabric-api':
+                  files=v['files']; f=next((x for x in files if x.get('primary')),files[0])
+                  target=mods/f['filename']
+                  with urllib.request.urlopen(urllib.request.Request(f['url'],headers=H),timeout=180) as r: target.write_bytes(r.read())
+              for dep in v.get('dependencies',[]):
+                  if dep.get('dependency_type')!='required': continue
+                  if dep.get('version_id'): install(get(f"{API}/version/{dep['version_id']}"))
+                  elif dep.get('project_id'):
+                      c=versions(dep['project_id'],True) or versions(dep['project_id'],False)
+                      if c: install(c[0])
+          iv=versions('iris',True); assert iv
+          install(iv[0])
+          sv=versions('complementary-reimagined',False); assert sv
+          files=sv[0]['files']; f=next((x for x in files if x.get('primary')),files[0])
+          packs=Path('run/shaderpacks'); packs.mkdir(parents=True,exist_ok=True)
+          target=packs/f['filename']
+          with urllib.request.urlopen(urllib.request.Request(f['url'],headers=H),timeout=180) as r: target.write_bytes(r.read())
+          Path('build/final-shader-name.txt').write_text(target.name)
+          PY
+          mkdir -p run/config
+          printf 'enableShaders=true\nshaderPack=%s\n' "$(cat build/final-shader-name.txt)" > run/config/iris.properties
+
+      - name: Iris enabled-shader startup test
+        id: iris
+        if: steps.iris_prepare.outcome == 'success'
+        continue-on-error: true
+        working-directory: .ci/atmospherics/work
+        run: |
+          set -o pipefail
+          rm -rf run/logs
+          JAVA_TOOL_OPTIONS='-Datmospherics.fabric.port.expectShader=true' timeout 720s xvfb-run -a gradle --no-daemon --stacktrace runClient 2>&1 | tee build/final-iris.log
+          grep -F 'Atmospherics confirmed an active Iris shader pipeline after 500 client ticks' run/logs/latest.log
+          grep -F 'Atmospherics Fabric smoke test completed after 600 client ticks' run/logs/latest.log
+          ! grep -E 'MixinApplyError|InvalidInjectionException|MixinTransformerError|ShaderCompileException' run/logs/latest.log
+
+      - name: Package release files
+        env:
+          IRIS_PREPARE: ${{ steps.iris_prepare.outcome }}
+          IRIS_TEST: ${{ steps.iris.outcome }}
+        run: |
+          set -euo pipefail
+          W=.ci/atmospherics/work
+          F=.ci/atmospherics/rendering-fix-src
+          D="$W/final-dist"
+          P="$W/build/final-smc-pack"
+          rm -rf "$D" "$P"
+          mkdir -p "$D" "$P/assets/minecraft/shaders/core"
+          cp "$W/build/libs/atmospherics-2.6.5-fabric-1.21.1.jar" "$D/atmospherics-2.6.5-fabric-1.21.1-smc-haze.jar"
+          cp "$F/story-mode-clouds-pack.mcmeta" "$P/pack.mcmeta"
+          cp "$F/resourcepacks/atmospherics_pack/assets/minecraft/shaders/core/rendertype_clouds.vsh" "$P/assets/minecraft/shaders/core/"
+          cp "$F/resourcepacks/atmospherics_pack/Story-Mode-Clouds-LICENSE.txt" "$P/" 2>/dev/null || true
+          (cd "$P" && zip -qr "$OLDPWD/$D/Story-Mode-Clouds-SMC-1.21.1.zip" .)
+          python - <<'PY'
+          import hashlib, json, os, zipfile
+          from pathlib import Path
+          d=Path('.ci/atmospherics/work/final-dist')
+          jar=d/'atmospherics-2.6.5-fabric-1.21.1-smc-haze.jar'
+          pack=d/'Story-Mode-Clouds-SMC-1.21.1.zip'
+          with zipfile.ZipFile(pack) as z:
+              meta=json.loads(z.read('pack.mcmeta'))
+              assert meta['pack']['pack_format']==34
+              assert 'assets/minecraft/shaders/core/rendertype_clouds.vsh' in z.namelist()
+          prep=os.environ.get('IRIS_PREPARE','unknown')
+          iris=os.environ.get('IRIS_TEST','skipped')
+          text=(
+            'Atmospherics 2.6.5 Fabric 1.21.1 — SMC + shader-haze build\n'
+            'Minecraft 1.21.1 | Fabric Loader 0.19.3 | Java 21\n\n'
+            'Changes:\n'
+            '- Fixed production Mixin refmap / AmbientFlow runtime target\n'
+            '- Air-haze particles stay enabled with Iris\n'
+            '- Horizon haze and comets render in a post-Iris sky pass\n'
+            '- Story Mode Clouds ported to resource-pack format 34\n'
+            '- Atmospherics sun/moon image overrides removed\n\n'
+            'Required tests:\n'
+            '- compile/remap: passed\n'
+            '- JAR/refmap/resource validation: passed\n'
+            '- normal Fabric client startup, 600 ticks: passed\n'
+            f'- Iris dependency preparation: {prep}\n'
+            f'- Iris + enabled shader pack startup: {iris}\n\n'
+            f'JAR SHA-256: {hashlib.sha256(jar.read_bytes()).hexdigest()}\n'
+            f'SMC ZIP SHA-256: {hashlib.sha256(pack.read_bytes()).hexdigest()}\n'
+          )
+          (d/'VALIDATION.txt').write_text(text)
+          PY
+          (cd "$D" && sha256sum * > SHA256SUMS.txt)
+
+      - name: Publish release files
+        run: |
+          set -euo pipefail
+          O=.ci/atmospherics/final-output
+          rm -rf "$O"; mkdir -p "$O"
+          cp .ci/atmospherics/work/final-dist/* "$O/"
+          printf 'status=success\nrun=%s\ncommit=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > .ci/atmospherics/final-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f "$O" .ci/atmospherics/final-status.txt
+          git commit -m 'ci: publish final Atmospherics Fabric SMC haze port [skip ci]'
+          git pull --rebase origin atmospherics-fabric-reupload
+          git push origin HEAD:atmospherics-fabric-reupload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: atmospherics-final-smc-haze
+          path: .ci/atmospherics/work/final-dist/*
+          retention-days: 7
+
+      - name: Publish failure status
+        if: failure()
+        run: |
+          set +e
+          printf 'status=failure\nrun=%s\ncommit=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > .ci/atmospherics/final-status.txt
+          mkdir -p .ci/atmospherics/final-diagnostics
+          cp .ci/atmospherics/work/build/final-normal.log .ci/atmospherics/final-diagnostics/ 2>/dev/null
+          cp .ci/atmospherics/work/run/logs/latest.log .ci/atmospherics/final-diagnostics/ 2>/dev/null
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f .ci/atmospherics/final-status.txt .ci/atmospherics/final-diagnostics
+          git commit -m 'ci: publish final Atmospherics failure [skip ci]' || exit 0
+          git pull --rebase origin atmospherics-fabric-reupload || exit 0
+          git push origin HEAD:atmospherics-fabric-reupload || true
