@@ -1,0 +1,161 @@
+name: Atmospherics Fabric Production Refmap Repair
+
+on:
+  push:
+    branches:
+      - atmospherics-fabric-reupload
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Generate project and install source mixins
+        run: |
+          set -euo pipefail
+          python .ci/atmospherics/generate_port.py
+          MIXIN_DST=.ci/atmospherics/work/src/main/java/com/beash/atmospherics/mixin
+          mkdir -p "$MIXIN_DST"
+          for file in \
+            AmbientFlowMixin.java \
+            BackgroundRendererMixin.java \
+            ClientWorldSkyColorMixin.java \
+            DimensionEffectsSunriseMixin.java \
+            LightningEntityRendererMixin.java \
+            WeatherSoundMixin.java \
+            WorldRendererSkyMixin.java; do
+            cp ".ci/atmospherics/decompiled-mixins/$file" "$MIXIN_DST/$file"
+          done
+
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path('.ci/atmospherics/work')
+          build = root / 'build.gradle'
+          text = build.read_text(encoding='utf-8')
+          text = text.replace(
+              "loom {\n    runs {",
+              "loom {\n    mixin {\n        defaultRefmapName = 'atmospherics.refmap.json'\n    }\n\n    runs {",
+              1,
+          )
+          text = text.replace(
+              "        exclude 'atmospherics.mixins.json'",
+              "        exclude 'atmospherics.mixins.json'\n        exclude 'com/beash/atmospherics/mixin/**'",
+              1,
+          )
+          build.write_text(text, encoding='utf-8')
+
+          # CFR preserves a few erased generic casts which Java source compilation rejects.
+          mixin_dir = root / 'src/main/java/com/beash/atmospherics/mixin'
+          for path in mixin_dir.glob('*.java'):
+              source = path.read_text(encoding='utf-8')
+              source = source.replace('cir.setReturnValue((Object)0);', 'cir.setReturnValue(0);')
+              path.write_text(source, encoding='utf-8')
+          PY
+
+      - name: Compile and remap repaired JAR
+        working-directory: .ci/atmospherics/work
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace clean remapJar 2>&1 | tee ../refmap-repair-compile.log
+
+      - name: Validate production mixin metadata
+        working-directory: .ci/atmospherics/work
+        run: |
+          set -euo pipefail
+          JAR=build/libs/atmospherics-2.6.5-fabric-1.21.1.jar
+          test -s "$JAR"
+          unzip -l "$JAR" | tee ../refmap-repair-entries.txt
+          unzip -l "$JAR" | grep -F 'atmospherics.refmap.json'
+          unzip -p "$JAR" atmospherics.mixins.json | tee ../refmap-repair-mixins.json
+          unzip -p "$JAR" atmospherics.mixins.json | grep -F '"refmap": "atmospherics.refmap.json"'
+          unzip -p "$JAR" atmospherics.refmap.json | tee ../refmap-repair-refmap.json
+          grep -F 'getSkyFlashTime' ../refmap-repair-refmap.json
+          grep -F 'setSkyFlashTime' ../refmap-repair-refmap.json
+          grep -F 'doAnimateTick' ../refmap-repair-refmap.json
+          grep -F 'renderSky' ../refmap-repair-refmap.json
+          grep -F 'setupColor' ../refmap-repair-refmap.json
+          grep -F 'setupFog' ../refmap-repair-refmap.json
+
+          python validate.py
+          cp build/atmospherics-2.6.5-fabric-1.21.1-validation.txt ../refmap-repair-validation.txt
+          cat >> ../refmap-repair-validation.txt <<'EOF'
+          - Active mixins recompiled from source under Fabric Loom
+          - Production refmap generated and embedded
+          - Mixin config explicitly references atmospherics.refmap.json
+          - ClientLevel sky-flash injection selectors are remapped for intermediary runtime
+          EOF
+
+      - name: Development launch regression test
+        working-directory: .ci/atmospherics/work
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libgl1
+          set -o pipefail
+          timeout 300s xvfb-run -a gradle --no-daemon --stacktrace runClient 2>&1 | tee ../refmap-repair-client.log
+          grep -F 'Atmospherics Fabric bridge initialized for Minecraft 1.21.1' run/logs/latest.log
+          grep -F 'Atmospherics Fabric smoke test completed after 120 client ticks' run/logs/latest.log
+
+      - name: Publish repaired files
+        run: |
+          set -euo pipefail
+          OUT=.ci/atmospherics/fixed-output
+          WORK=.ci/atmospherics/work
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          cp "$WORK/build/libs/atmospherics-2.6.5-fabric-1.21.1.jar" \
+            "$OUT/atmospherics-2.6.5-fabric-1.21.1-refmapfix.jar"
+          cp .ci/atmospherics/refmap-repair-validation.txt "$OUT/validation.txt"
+          cp .ci/atmospherics/refmap-repair-refmap.json "$OUT/atmospherics.refmap.json"
+          (cd "$OUT" && sha256sum * > SHA256SUMS.txt)
+          printf 'success\nrun=%s\n' "$GITHUB_RUN_ID" > .ci/atmospherics/refmap-repair-status.txt
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f "$OUT" .ci/atmospherics/refmap-repair-status.txt \
+            .ci/atmospherics/refmap-repair-compile.log \
+            .ci/atmospherics/refmap-repair-mixins.json
+          git commit -m 'ci: publish Atmospherics production-refmap repair [skip ci]'
+          git pull --rebase origin atmospherics-fabric-reupload
+          git push origin HEAD:atmospherics-fabric-reupload
+
+      - name: Upload repaired JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: atmospherics-fabric-1.21.1-refmapfix
+          path: .ci/atmospherics/fixed-output/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          printf 'failure\nrun=%s\n' "$GITHUB_RUN_ID" > .ci/atmospherics/refmap-repair-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f .ci/atmospherics/refmap-repair-status.txt \
+            .ci/atmospherics/refmap-repair-compile.log \
+            .ci/atmospherics/refmap-repair-client.log \
+            .ci/atmospherics/refmap-repair-refmap.json \
+            .ci/atmospherics/refmap-repair-mixins.json
+          git commit -m 'ci: publish Atmospherics refmap repair failure [skip ci]'
+          git pull --rebase origin atmospherics-fabric-reupload
+          git push origin HEAD:atmospherics-fabric-reupload
