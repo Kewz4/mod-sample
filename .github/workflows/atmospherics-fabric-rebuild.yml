@@ -7,10 +7,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-and-smoke-test:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -89,3 +90,18 @@ jobs:
           path: .ci/atmospherics/work/dist/*
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish files to the temporary build branch
+        run: |
+          rm -rf .ci/atmospherics/output
+          mkdir -p .ci/atmospherics/output
+          cp .ci/atmospherics/work/dist/* .ci/atmospherics/output/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f .ci/atmospherics/output
+          if git diff --cached --quiet; then
+            echo "Published files are already current"
+            exit 0
+          fi
+          git commit -m "ci: publish rebuilt Atmospherics Fabric files [skip ci]"
+          git push origin HEAD:atmospherics-fabric-reupload
