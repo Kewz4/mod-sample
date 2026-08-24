@@ -1,4 +1,4 @@
-name: Atmospherics Fabric 1.21.1 Attachment Export
+name: Atmospherics Fabric 1.21.1 Mixin Namespace Hotfix
 
 on:
   push:
@@ -10,27 +10,207 @@ permissions:
   contents: write
 
 jobs:
-  export-attachment:
+  build-test-publish:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
 
     steps:
-      - name: Check out published build
+      - name: Check out build branch
         uses: actions/checkout@v4
 
-      - name: Verify published files
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle 8.10.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Generate compatibility-port sources
+        run: python .ci/atmospherics/generate_port.py
+
+      - name: Apply official-namespace Mixin hotfix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path('.ci/atmospherics/work')
+
+          props = root / 'gradle.properties'
+          text = props.read_text(encoding='utf-8')
+          text = text.replace('mod_version=2.6.5-fabric.1', 'mod_version=2.6.5-fabric.2')
+          props.write_text(text, encoding='utf-8')
+
+          build = root / 'build.gradle'
+          text = build.read_text(encoding='utf-8')
+          text += r'''
+
+          // The original 1.21.1 NeoForge classes and their Mixin selector strings use
+          // Mojang's official names. Keep the complete mod in that namespace and let
+          // Fabric Loader remap the whole JAR at launch, matching current Fabric mods.
+          tasks.named('jar') {
+              archiveFileName = "atmospherics-2.6.5-fabric-1.21.1.jar"
+              manifest {
+                  attributes('Fabric-Mapping-Namespace': 'official')
+              }
+          }
+          '''
+          build.write_text(text, encoding='utf-8')
+
+          validate = root / 'validate.py'
+          text = validate.read_text(encoding='utf-8')
+          text = text.replace('2.6.5-fabric.1', '2.6.5-fabric.2')
+          text = text.replace('- Production namespace remap task completed',
+                              '- Complete JAR preserved in Mojang official namespace')
+          validate.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Compile official-namespace production JAR
+        working-directory: .ci/atmospherics/work
+        run: gradle --no-daemon --stacktrace clean jar
+
+      - name: Validate JAR structure, metadata, and namespace
+        working-directory: .ci/atmospherics/work
+        run: |
+          python validate.py
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          jar = Path('build/libs/atmospherics-2.6.5-fabric-1.21.1.jar')
+          with zipfile.ZipFile(jar) as zf:
+              manifest = zf.read('META-INF/MANIFEST.MF').decode('utf-8', 'replace')
+              if 'Fabric-Mapping-Namespace: official' not in manifest:
+                  raise SystemExit('Official mapping namespace is missing from manifest')
+              ambient = zf.read('com/beash/atmospherics/mixin/AmbientFlowMixin.class')
+              if b'getSkyFlashTime' not in ambient:
+                  raise SystemExit('Expected official Mixin selector was not preserved')
+          print('Official namespace manifest and Mixin selectors verified')
+          PY
+
+      - name: Install virtual-display libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libgl1
+
+      - name: Create independent Yarn-mapped consumer instance
         run: |
           set -euo pipefail
-          test -s .ci/atmospherics/output/atmospherics-2.6.5-fabric-1.21.1.jar
-          test -s .ci/atmospherics/output/atmospherics-2.6.5-fabric-1.21.1-validation.txt
-          cd .ci/atmospherics/output
-          sha256sum -c SHA256SUMS.txt
+          CONSUMER=.ci/atmospherics/consumer
+          rm -rf "$CONSUMER"
+          mkdir -p "$CONSUMER"
 
-      - name: Upload downloadable attachment
+          cat > "$CONSUMER/settings.gradle" <<'EOF'
+          pluginManagement {
+              repositories {
+                  maven { url = 'https://maven.fabricmc.net/' }
+                  gradlePluginPortal()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = 'atmospherics-production-consumer-test'
+          EOF
+
+          cat > "$CONSUMER/build.gradle" <<'EOF'
+          plugins {
+              id 'fabric-loom' version '1.8.13'
+          }
+
+          repositories {
+              maven { url = 'https://maven.fabricmc.net/' }
+              mavenCentral()
+          }
+
+          dependencies {
+              minecraft 'com.mojang:minecraft:1.21.1'
+              mappings 'net.fabricmc:yarn:1.21.1+build.3:v2'
+              modImplementation 'net.fabricmc:fabric-loader:0.19.3'
+              modImplementation 'net.fabricmc.fabric-api:fabric-api:0.116.7+1.21.1'
+              modImplementation files('../work/build/libs/atmospherics-2.6.5-fabric-1.21.1.jar')
+          }
+
+          loom {
+              runs {
+                  client {
+                      client()
+                      name = 'Installed Atmospherics production JAR test'
+                      runDir = 'run'
+                      vmArg '-Datmospherics.fabric.port.smokeTest=true'
+                  }
+              }
+          }
+
+          java {
+              toolchain.languageVersion = JavaLanguageVersion.of(21)
+          }
+          EOF
+
+      - name: Launch the installed production JAR through Yarn mappings
+        working-directory: .ci/atmospherics/consumer
+        run: |
+          set -o pipefail
+          timeout 300s xvfb-run -a gradle --no-daemon --stacktrace runClient 2>&1 | tee production-consumer-console.log
+          grep -F 'Atmospherics Fabric bridge initialized for Minecraft 1.21.1' run/logs/latest.log
+          grep -F 'Atmospherics Fabric smoke test completed after 120 client ticks' run/logs/latest.log
+          if grep -E 'MixinApplyError|InvalidInjectionException|Mixin transformation .* failed' run/logs/latest.log; then
+              echo 'Production JAR produced a Mixin failure' >&2
+              exit 1
+          fi
+
+      - name: Finalize validation report
+        working-directory: .ci/atmospherics/work
+        run: |
+          cat >> build/atmospherics-2.6.5-fabric-1.21.1-validation.txt <<'EOF'
+          - Manifest declares Fabric-Mapping-Namespace: official
+          - Installed production JAR remapped into an independent Yarn 1.21.1 client
+          - All configured Mixins applied without MixinApplyError or InvalidInjectionException
+          - Client entrypoint remained active for 120 ticks and shut down cleanly
+          EOF
+
+      - name: Package downloadable files
+        run: |
+          set -euo pipefail
+          OUT=.ci/atmospherics/output
+          WORK=.ci/atmospherics/work
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          cp "$WORK/build/libs/atmospherics-2.6.5-fabric-1.21.1.jar" "$OUT/"
+          cp "$WORK/build/atmospherics-2.6.5-fabric-1.21.1-validation.txt" "$OUT/"
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          root = Path('.ci/atmospherics/work')
+          out = Path('.ci/atmospherics/output/atmospherics-fabric-1.21.1-port-source.zip')
+          excluded = {'.gradle', 'build', 'run', 'dist', 'original'}
+          with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+              for path in sorted(root.rglob('*')):
+                  if not path.is_file():
+                      continue
+                  rel = path.relative_to(root)
+                  if rel.parts and rel.parts[0] in excluded:
+                      continue
+                  zf.write(path, rel.as_posix())
+          PY
+          (cd "$OUT" && sha256sum * > SHA256SUMS.txt)
+
+      - name: Publish rebuilt files to branch
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f .ci/atmospherics/output
+          git commit -m 'ci: publish Atmospherics official-namespace hotfix [skip ci]'
+          git push origin HEAD:atmospherics-fabric-reupload
+
+      - name: Upload corrected Atmospherics port
         uses: actions/upload-artifact@v4
         with:
-          name: atmospherics-fabric-1.21.1
+          name: atmospherics-fabric-1.21.1-mixin-hotfix
           path: .ci/atmospherics/output/*
           if-no-files-found: error
           retention-days: 7
@@ -38,9 +218,9 @@ jobs:
       - name: Publish workflow run ID
         run: |
           set -euo pipefail
-          printf '%s\n' "$GITHUB_RUN_ID" > .ci/atmospherics/artifact-run-id.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f .ci/atmospherics/artifact-run-id.txt
-          git commit -m "ci: publish Atmospherics attachment run ID [skip ci]"
+          printf '%s\n' "$GITHUB_RUN_ID" > .ci/atmospherics/hotfix-run-id.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f .ci/atmospherics/hotfix-run-id.txt
+          git commit -m 'ci: publish Atmospherics hotfix run ID [skip ci]'
           git push origin HEAD:atmospherics-fabric-reupload
