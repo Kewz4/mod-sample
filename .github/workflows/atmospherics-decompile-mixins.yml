@@ -13,7 +13,7 @@ jobs:
   decompile:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
 
     steps:
       - uses: actions/checkout@v4
@@ -23,36 +23,59 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Download original mod and CFR
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Generate port project and resolve original mod
+        run: |
+          set -euo pipefail
+          python .ci/atmospherics/generate_port.py
+          cat >> .ci/atmospherics/work/build.gradle <<'EOF'
+          tasks.register('copyOriginalBinary', Copy) {
+              from configurations.originalBinary
+              into layout.buildDirectory.dir('original')
+              rename { 'original.jar' }
+          }
+          EOF
+          cd .ci/atmospherics/work
+          gradle --no-daemon copyOriginalBinary
+          echo '60d420dbdefd81894d509270d7577e865b49aa917eab5ad0a4806c80c215fe27  build/original/original.jar' | sha256sum -c -
+
+      - name: Download CFR and decompile original mod
         run: |
           set -euo pipefail
           mkdir -p .ci/atmospherics/decompiler
-          curl -fL --retry 3 -o .ci/atmospherics/decompiler/original.jar \
-            'https://mediafilez.forgecdn.net/files/8394/888/atmospherics-2.6.5-mc-1.21.1.jar'
           curl -fL --retry 3 -o .ci/atmospherics/decompiler/cfr.jar \
-            'https://repo1.maven.org/maven2/org/benf/cfr/0.152/cfr-0.152.jar'
-          echo '60d420dbdefd81894d509270d7577e865b49aa917eab5ad0a4806c80c215fe27  .ci/atmospherics/decompiler/original.jar' | sha256sum -c -
-
-      - name: Decompile original mod
-        run: |
-          set -euo pipefail
+            'https://repo.maven.apache.org/maven2/org/benf/cfr/0.152/cfr-0.152.jar'
           rm -rf .ci/atmospherics/decompiled-all .ci/atmospherics/decompiled-mixins
           java -jar .ci/atmospherics/decompiler/cfr.jar \
-            .ci/atmospherics/decompiler/original.jar \
+            .ci/atmospherics/work/build/original/original.jar \
             --outputdir .ci/atmospherics/decompiled-all \
             --silent true \
             --caseinsensitivefs true
           mkdir -p .ci/atmospherics/decompiled-mixins
           cp -a .ci/atmospherics/decompiled-all/com/beash/atmospherics/mixin/. \
             .ci/atmospherics/decompiled-mixins/
-          find .ci/atmospherics/decompiled-mixins -type f -maxdepth 2 -print
+          find .ci/atmospherics/decompiled-mixins -maxdepth 2 -type f -print
 
       - name: Publish decompiled mixins
         run: |
           set -euo pipefail
-          rm -rf .ci/atmospherics/decompiler .ci/atmospherics/decompiled-all
+          rm -rf .ci/atmospherics/decompiler .ci/atmospherics/decompiled-all .ci/atmospherics/work
+          printf 'success\nrun=%s\n' "$GITHUB_RUN_ID" > .ci/atmospherics/decompile-status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -f .ci/atmospherics/decompiled-mixins
+          git add -f .ci/atmospherics/decompiled-mixins .ci/atmospherics/decompile-status.txt
           git commit -m 'ci: publish decompiled Atmospherics mixins [skip ci]'
           git push origin HEAD:atmospherics-fabric-reupload
+
+      - name: Publish failure status
+        if: failure()
+        run: |
+          printf 'failure\nrun=%s\n' "$GITHUB_RUN_ID" > .ci/atmospherics/decompile-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f .ci/atmospherics/decompile-status.txt
+          git commit -m 'ci: publish decompile failure [skip ci]' || true
+          git push origin HEAD:atmospherics-fabric-reupload || true
