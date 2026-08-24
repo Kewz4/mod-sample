@@ -85,14 +85,6 @@ jobs:
           PY
           sha256sum dist/* > dist/SHA256SUMS.txt
 
-      - name: Upload rebuilt Atmospherics port
-        uses: actions/upload-artifact@v4
-        with:
-          name: atmospherics-fabric-1.21.1
-          path: .ci/atmospherics/work/dist/*
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Publish files to the temporary build branch
         run: |
           rm -rf .ci/atmospherics/output
@@ -107,6 +99,15 @@ jobs:
           fi
           git commit -m "ci: publish rebuilt Atmospherics Fabric files [skip ci]"
           git push origin HEAD:atmospherics-fabric-reupload
+
+      - name: Upload rebuilt Atmospherics port
+        uses: actions/upload-artifact@v4
+        with:
+          name: atmospherics-fabric-1.21.1
+          path: .ci/atmospherics/work/dist/*
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
 
       - name: Publish CI status and diagnostics
         if: always()
