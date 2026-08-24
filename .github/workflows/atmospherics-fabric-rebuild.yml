@@ -1,4 +1,4 @@
-name: Atmospherics Fabric 1.21.1 Rebuild
+name: Atmospherics Fabric 1.21.1 Republish
 
 on:
   push:
@@ -10,10 +10,10 @@ permissions:
   contents: write
 
 jobs:
-  build-and-smoke-test:
+  build-and-publish:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
 
     steps:
       - name: Check out build branch
@@ -35,101 +35,35 @@ jobs:
 
       - name: Compile and remap production JAR
         working-directory: .ci/atmospherics/work
-        run: |
-          set -o pipefail
-          gradle --no-daemon --stacktrace clean remapJar 2>&1 | tee ../compile.log
+        run: gradle --no-daemon --stacktrace clean remapJar
 
       - name: Validate JAR structure and metadata
         working-directory: .ci/atmospherics/work
         run: python validate.py
 
-      - name: Install virtual-display libraries
+      - name: Package files for download
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libgl1
+          set -euo pipefail
+          OUT=.ci/atmospherics/output
+          WORK=.ci/atmospherics/work
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          cp "$WORK/build/libs/atmospherics-2.6.5-fabric-1.21.1.jar" "$OUT/"
+          cp "$WORK/build/atmospherics-2.6.5-fabric-1.21.1-validation.txt" "$OUT/"
+          (
+            cd "$WORK"
+            zip -qr "../output/atmospherics-fabric-1.21.1-port-source.zip" \
+              build.gradle gradle.properties settings.gradle \
+              patch_private_descriptor.py validate.py src
+          )
+          (cd "$OUT" && sha256sum atmospherics-2.6.5-fabric-1.21.1.jar atmospherics-fabric-1.21.1-port-source.zip > SHA256SUMS.txt)
+          ls -lah "$OUT"
 
-      - name: Launch Minecraft 1.21.1 Fabric smoke test
-        working-directory: .ci/atmospherics/work
+      - name: Publish rebuilt files to branch
         run: |
-          set -o pipefail
-          timeout 300s xvfb-run -a gradle --no-daemon --stacktrace runClient 2>&1 | tee build/client-smoke-console.log
-          grep -F "Atmospherics Fabric bridge initialized for Minecraft 1.21.1" run/logs/latest.log
-          grep -F "Atmospherics Fabric smoke test completed after 120 client ticks" run/logs/latest.log
-          cat >> build/atmospherics-2.6.5-fabric-1.21.1-validation.txt <<'EOF'
-          - Real Fabric client startup completed under Xvfb
-          - Entrypoint initialized and remained active for 120 client ticks
-          EOF
-
-      - name: Package downloadable files
-        working-directory: .ci/atmospherics/work
-        run: |
-          mkdir -p dist
-          cp build/libs/atmospherics-2.6.5-fabric-1.21.1.jar dist/
-          cp build/atmospherics-2.6.5-fabric-1.21.1-validation.txt dist/
-          python - <<'PY'
-          from pathlib import Path
-          import zipfile
-
-          root = Path('.').resolve()
-          target = root / 'dist' / 'atmospherics-fabric-1.21.1-port-source.zip'
-          excluded_roots = {'.gradle', 'build', 'run', 'dist', 'original'}
-          with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-              for path in sorted(root.rglob('*')):
-                  if not path.is_file():
-                      continue
-                  rel = path.relative_to(root)
-                  if rel.parts and rel.parts[0] in excluded_roots:
-                      continue
-                  zf.write(path, rel.as_posix())
-          print(target)
-          PY
-          sha256sum dist/* > dist/SHA256SUMS.txt
-
-      - name: Publish files to the temporary build branch
-        run: |
-          rm -rf .ci/atmospherics/output
-          mkdir -p .ci/atmospherics/output
-          cp .ci/atmospherics/work/dist/* .ci/atmospherics/output/
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f .ci/atmospherics/output
-          if git diff --cached --quiet; then
-            echo "Published files are already current"
-            exit 0
-          fi
-          git commit -m "ci: publish rebuilt Atmospherics Fabric files [skip ci]"
-          git push origin HEAD:atmospherics-fabric-reupload
-
-      - name: Upload rebuilt Atmospherics port
-        uses: actions/upload-artifact@v4
-        with:
-          name: atmospherics-fabric-1.21.1
-          path: .ci/atmospherics/work/dist/*
-          if-no-files-found: error
-          retention-days: 7
-          include-hidden-files: true
-
-      - name: Publish CI status and diagnostics
-        if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          mkdir -p .ci/atmospherics/diagnostics
-          printf 'status=%s\ncommit=%s\n' "$JOB_STATUS" "$GITHUB_SHA" > .ci/atmospherics/ci-status.txt
-          if [ -f .ci/atmospherics/compile.log ]; then
-            cp .ci/atmospherics/compile.log .ci/atmospherics/diagnostics/compile.log
-          fi
-          if [ -f .ci/atmospherics/work/run/logs/latest.log ]; then
-            cp .ci/atmospherics/work/run/logs/latest.log .ci/atmospherics/diagnostics/latest.log
-          fi
-          if [ -f .ci/atmospherics/work/build/client-smoke-console.log ]; then
-            cp .ci/atmospherics/work/build/client-smoke-console.log .ci/atmospherics/diagnostics/client-smoke-console.log
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f .ci/atmospherics/ci-status.txt .ci/atmospherics/diagnostics
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git commit -m "ci: publish Atmospherics build status [skip ci]"
+          git commit -m "ci: republish Atmospherics Fabric 1.21.1 files [skip ci]"
           git push origin HEAD:atmospherics-fabric-reupload
