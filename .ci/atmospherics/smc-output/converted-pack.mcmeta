@@ -1,0 +1,39 @@
+{
+  "pack": {
+    "pack_format": 34,
+    "supported_formats": {
+      "min_inclusive": 34,
+      "max_inclusive": 99
+    },
+    "min_format": 20,
+    "max_format": 128,
+    "description": "Story Mode Clouds 1.3 — Minecraft 1.21.1 compatibility build"
+  },
+  "overlays": {
+    "entries": [
+      {
+        "directory": "1.21.6",
+        "formats": {
+          "min_inclusive": 56,
+          "max_inclusive": 128
+        },
+        "min_format": 56,
+        "max_format": 128
+      },
+      {
+        "directory": "1.21.5",
+        "formats": {
+          "min_inclusive": 20,
+          "max_inclusive": 55
+        },
+        "min_format": 20,
+        "max_format": 55
+      }
+    ]
+  },
+  "sodium": {
+    "ignored_shaders": [
+      "rendertype_clouds.vsh"
+    ]
+  }
+}

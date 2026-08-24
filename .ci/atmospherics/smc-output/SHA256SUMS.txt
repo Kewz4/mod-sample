@@ -1,0 +1,1 @@
+6069771988b5b8f97a589571be585e2eb8a745ab7b9621c6cdfc316bd10264f6  .ci/atmospherics/smc-output/Story-Mode-Clouds-1.3-MC-1.21.1.zip

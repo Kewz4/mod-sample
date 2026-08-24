@@ -1,0 +1,10 @@
+1.21.5/assets/minecraft/shaders/core/rendertype_clouds.vsh
+1.21.6/assets/minecraft/shaders/core/._rendertype_clouds.vsh
+1.21.6/assets/minecraft/shaders/core/rendertype_clouds.vsh
+License.txt
+__MACOSX/._License.txt
+__MACOSX/._pack.mcmeta
+__MACOSX/._pack.png
+__MACOSX/1.21.6/assets/minecraft/shaders/core/._rendertype_clouds.vsh
+pack.mcmeta
+pack.png
