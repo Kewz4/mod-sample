@@ -1,0 +1,15 @@
+{
+  "pack": {
+    "pack_format": 34,
+    "supported_formats": {
+      "min_inclusive": 34,
+      "max_inclusive": 34
+    },
+    "description": "Story Mode Clouds 1.3 — Minecraft 1.21.1"
+  },
+  "sodium": {
+    "ignored_shaders": [
+      "rendertype_clouds.vsh"
+    ]
+  }
+}
