@@ -1,0 +1,91 @@
+name: Atmospherics Fabric 1.21.1 Rebuild
+
+on:
+  push:
+    branches:
+      - atmospherics-fabric-reupload
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out build branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle 8.10.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Generate compatibility-port sources
+        run: python .ci/atmospherics/generate_port.py
+
+      - name: Compile and remap production JAR
+        working-directory: .ci/atmospherics/work
+        run: gradle --no-daemon --stacktrace clean remapJar
+
+      - name: Validate JAR structure and metadata
+        working-directory: .ci/atmospherics/work
+        run: python validate.py
+
+      - name: Install virtual-display libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libgl1
+
+      - name: Launch Minecraft 1.21.1 Fabric smoke test
+        working-directory: .ci/atmospherics/work
+        run: |
+          set -o pipefail
+          timeout 300s xvfb-run -a gradle --no-daemon --stacktrace runClient 2>&1 | tee build/client-smoke-console.log
+          grep -F "Atmospherics Fabric bridge initialized for Minecraft 1.21.1" run/logs/latest.log
+          grep -F "Atmospherics Fabric smoke test completed after 120 client ticks" run/logs/latest.log
+          cat >> build/atmospherics-2.6.5-fabric-1.21.1-validation.txt <<'EOF'
+          - Real Fabric client startup completed under Xvfb
+          - Entrypoint initialized and remained active for 120 client ticks
+          EOF
+
+      - name: Package downloadable files
+        working-directory: .ci/atmospherics/work
+        run: |
+          mkdir -p dist
+          cp build/libs/atmospherics-2.6.5-fabric-1.21.1.jar dist/
+          cp build/atmospherics-2.6.5-fabric-1.21.1-validation.txt dist/
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          root = Path('.').resolve()
+          target = root / 'dist' / 'atmospherics-fabric-1.21.1-port-source.zip'
+          excluded_roots = {'.gradle', 'build', 'run', 'dist', 'original'}
+          with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+              for path in sorted(root.rglob('*')):
+                  if not path.is_file():
+                      continue
+                  rel = path.relative_to(root)
+                  if rel.parts and rel.parts[0] in excluded_roots:
+                      continue
+                  zf.write(path, rel.as_posix())
+          print(target)
+          PY
+          sha256sum dist/* > dist/SHA256SUMS.txt
+
+      - name: Upload rebuilt Atmospherics port
+        uses: actions/upload-artifact@v4
+        with:
+          name: atmospherics-fabric-1.21.1
+          path: .ci/atmospherics/work/dist/*
+          if-no-files-found: error
+          retention-days: 7
