@@ -1,0 +1,187 @@
+name: Atmospherics Fabric Rendering Compatibility V3
+
+on:
+  push:
+    branches:
+      - atmospherics-fabric-reupload
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  STATUS_FILE: .ci/atmospherics/rendering-v3-status.txt
+
+jobs:
+  build-test-publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish active run ID
+        run: |
+          set -euo pipefail
+          printf 'running\nrun=%s\ncommit=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > "$STATUS_FILE"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f "$STATUS_FILE"
+          git commit -m 'ci: publish active Atmospherics rendering V3 run [skip ci]'
+          git pull --rebase origin atmospherics-fabric-reupload
+          git push origin HEAD:atmospherics-fabric-reupload
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Generate project and apply rendering patches
+        run: |
+          set -euo pipefail
+          python .ci/atmospherics/generate_port.py
+          work=.ci/atmospherics/work
+          mixin_dst="$work/src/main/java/com/beash/atmospherics/mixin"
+          mkdir -p "$mixin_dst"
+          for mixin in \
+            AmbientFlowMixin \
+            LightningEntityRendererMixin \
+            ClientWorldSkyColorMixin \
+            DimensionEffectsSunriseMixin \
+            BackgroundRendererMixin \
+            WeatherSoundMixin \
+            WorldRendererSkyMixin \
+            WorldRendererCloudMixin; do
+            cp ".ci/atmospherics/decompiled-mixins/$mixin.java" "$mixin_dst/$mixin.java"
+          done
+          cp -a .ci/atmospherics/rendering-fix-src/com/. "$work/src/main/java/com/"
+          mkdir -p "$work/src/main/resources/resourcepacks/atmospherics_pack"
+          cp -a .ci/atmospherics/rendering-fix-src/resourcepacks/atmospherics_pack/. \
+            "$work/src/main/resources/resourcepacks/atmospherics_pack/"
+          python .ci/atmospherics/rendering-fix-src/apply_v3.py
+
+      - name: Compile and remap production JAR
+        working-directory: .ci/atmospherics/work
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace clean remapJar 2>&1 | tee ../rendering-v3-compile.log
+
+      - name: Validate rendering fixes and embedded cloud pack
+        working-directory: .ci/atmospherics/work
+        run: |
+          set -euo pipefail
+          jar=build/libs/atmospherics-2.6.5-fabric-1.21.1.jar
+          test -s "$jar"
+          python validate.py
+          unzip -p "$jar" atmospherics.mixins.json > ../rendering-v3-mixins.json
+          unzip -p "$jar" atmospherics.refmap.json > ../rendering-v3-refmap.json
+          grep -F 'WorldRendererCloudMixin' ../rendering-v3-mixins.json
+          grep -F 'FogConfigScreenCloudSupportMixin' ../rendering-v3-mixins.json
+          grep -F 'renderClouds' ../rendering-v3-refmap.json
+          grep -F 'buildClouds' ../rendering-v3-refmap.json
+          grep -F 'init' ../rendering-v3-refmap.json
+          unzip -l "$jar" | grep -F 'com/beash/atmospherics/compat/ShaderCompat.class'
+          unzip -l "$jar" | grep -F 'com/beash/atmospherics/mixin/WorldRendererCloudMixin.class'
+          unzip -l "$jar" | grep -F 'com/beash/atmospherics/mixin/FogConfigScreenCloudSupportMixin.class'
+          unzip -l "$jar" | grep -F 'resourcepacks/atmospherics_pack/assets/minecraft/shaders/core/rendertype_clouds.vsh'
+          unzip -l "$jar" | grep -F 'resourcepacks/atmospherics_pack/Story-Mode-Clouds-LICENSE.txt'
+          if unzip -l "$jar" | grep -Fq 'resourcepacks/atmospherics_pack/assets/minecraft/textures/environment/sun.png'; then
+            echo 'Custom sun texture still present' >&2
+            exit 1
+          fi
+          if unzip -l "$jar" | grep -Fq 'assets/minecraft/shaders/core/particle_no_cutoff'; then
+            echo 'Global minecraft-namespace particle shader override still present' >&2
+            exit 1
+          fi
+          cat >> build/atmospherics-2.6.5-fabric-1.21.1-validation.txt <<'REPORT'
+          - Custom sun texture override removed; vanilla/resource-pack sun is restored
+          - WorldRendererCloudMixin activated and production-remapped
+          - Cloud mode and SMC settings buttons reconnected to their existing screens
+          - Story Mode Clouds core shader embedded in the default Atmospherics pack for 1.21.1
+          - Custom Atmospherics sky/horizon haze renderer bypasses itself while an Iris shader pack is active
+          - Global minecraft-namespace particle shader override removed
+          REPORT
+
+      - name: Launch Minecraft client and exercise cloud controls
+        working-directory: .ci/atmospherics/work
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libgl1
+          set -o pipefail
+          timeout 300s xvfb-run -a gradle --no-daemon --stacktrace runClient 2>&1 | tee ../rendering-v3-client.log
+          grep -F 'Atmospherics Fabric bridge initialized for Minecraft 1.21.1' run/logs/latest.log
+          grep -F 'Atmospherics cloud controls smoke test completed' run/logs/latest.log
+          grep -F 'Atmospherics Fabric smoke test completed after 120 client ticks' run/logs/latest.log
+          if grep -E 'MixinApplyError|InvalidInjectionException|Could not open Atmospherics cloud mode|Could not open Atmospherics Story Mode Clouds settings|Couldn.t compile.*rendertype_clouds|Failed to compile.*rendertype_clouds' run/logs/latest.log; then
+            echo 'Rendering compatibility regression detected' >&2
+            exit 1
+          fi
+
+      - name: Build standalone Story Mode Clouds 1.21.1 pack
+        run: |
+          set -euo pipefail
+          pack=.ci/atmospherics/smc-v3-pack
+          rm -rf "$pack"
+          mkdir -p "$pack/assets/minecraft/shaders/core"
+          cp .ci/atmospherics/rendering-fix-src/resourcepacks/atmospherics_pack/assets/minecraft/shaders/core/rendertype_clouds.vsh \
+            "$pack/assets/minecraft/shaders/core/rendertype_clouds.vsh"
+          cp .ci/atmospherics/rendering-fix-src/resourcepacks/atmospherics_pack/Story-Mode-Clouds-LICENSE.txt \
+            "$pack/License.txt"
+          cp .ci/atmospherics/rendering-fix-src/story-mode-clouds-pack.mcmeta "$pack/pack.mcmeta"
+          unzip -p .ci/atmospherics/smc-output/Story-Mode-Clouds-1.3-MC-1.21.1.zip pack.png > "$pack/pack.png"
+
+      - name: Publish fixed files
+        run: |
+          set -euo pipefail
+          out=.ci/atmospherics/rendering-v3-output
+          rm -rf "$out"
+          mkdir -p "$out"
+          cp .ci/atmospherics/work/build/libs/atmospherics-2.6.5-fabric-1.21.1.jar \
+            "$out/atmospherics-2.6.5-fabric-1.21.1-renderfix.jar"
+          cp .ci/atmospherics/work/build/atmospherics-2.6.5-fabric-1.21.1-validation.txt \
+            "$out/validation.txt"
+          (cd .ci/atmospherics/smc-v3-pack && zip -qr ../rendering-v3-output/Story-Mode-Clouds-1.3-MC-1.21.1.zip .)
+          (cd "$out" && sha256sum *.jar *.zip validation.txt > SHA256SUMS.txt)
+          printf 'success\nrun=%s\ncommit=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > "$STATUS_FILE"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f "$out" "$STATUS_FILE" \
+            .ci/atmospherics/rendering-v3-compile.log \
+            .ci/atmospherics/rendering-v3-client.log \
+            .ci/atmospherics/rendering-v3-mixins.json \
+            .ci/atmospherics/rendering-v3-refmap.json
+          git commit -m 'ci: publish Atmospherics rendering compatibility V3 [skip ci]'
+          git pull --rebase origin atmospherics-fabric-reupload
+          git push origin HEAD:atmospherics-fabric-reupload
+
+      - name: Upload fixed files
+        uses: actions/upload-artifact@v4
+        with:
+          name: atmospherics-fabric-1.21.1-renderfix-v3
+          path: .ci/atmospherics/rendering-v3-output/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          printf 'failure\nrun=%s\ncommit=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > "$STATUS_FILE"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f "$STATUS_FILE"
+          for file in \
+            .ci/atmospherics/rendering-v3-compile.log \
+            .ci/atmospherics/rendering-v3-client.log \
+            .ci/atmospherics/rendering-v3-mixins.json \
+            .ci/atmospherics/rendering-v3-refmap.json; do
+            [ -f "$file" ] && git add -f "$file"
+          done
+          git commit -m 'ci: publish Atmospherics rendering V3 failure diagnostics [skip ci]' || true
+          git pull --rebase origin atmospherics-fabric-reupload || true
+          git push origin HEAD:atmospherics-fabric-reupload || true
