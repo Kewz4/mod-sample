@@ -1,0 +1,2 @@
+8e435081510776b6b5dfca413b5ca21cb1d2ad6008f850f874d3236da74f31b8  atmospherics-2.6.5-fabric-1.21.1.jar
+a9b54e121a077d1bc0ff698b87191a83adfb03612d08b07367c552527c741fdd  atmospherics-fabric-1.21.1-port-source.zip
