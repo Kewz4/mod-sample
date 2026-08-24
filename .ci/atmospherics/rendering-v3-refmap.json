@@ -1,0 +1,86 @@
+{
+  "mappings": {
+    "com/beash/atmospherics/mixin/AmbientFlowMixin": {
+      "Lnet/minecraft/world/level/block/Block;animateTick(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/util/RandomSource;)V": "Lnet/minecraft/class_2248;method_9496(Lnet/minecraft/class_2680;Lnet/minecraft/class_1937;Lnet/minecraft/class_2338;Lnet/minecraft/class_5819;)V",
+      "doAnimateTick": "Lnet/minecraft/class_638;method_2943(IIIILnet/minecraft/class_5819;Lnet/minecraft/class_2248;Lnet/minecraft/class_2338$class_2339;)V",
+      "getSkyFlashTime": "Lnet/minecraft/class_638;method_23789()I",
+      "playLocalSound(DDDLnet/minecraft/sounds/SoundEvent;Lnet/minecraft/sounds/SoundSource;FFZ)V": "Lnet/minecraft/class_638;method_8486(DDDLnet/minecraft/class_3414;Lnet/minecraft/class_3419;FFZ)V",
+      "setSkyFlashTime": "Lnet/minecraft/class_638;method_8509(I)V"
+    },
+    "com/beash/atmospherics/mixin/BackgroundRendererMixin": {
+      "setupColor": "Lnet/minecraft/class_758;method_3210(Lnet/minecraft/class_4184;FLnet/minecraft/class_638;IF)V",
+      "setupFog": "Lnet/minecraft/class_758;method_3211(Lnet/minecraft/class_4184;Lnet/minecraft/class_758$class_4596;FZF)V"
+    },
+    "com/beash/atmospherics/mixin/ClientWorldSkyColorMixin": {
+      "getSkyColor": "Lnet/minecraft/class_638;method_23777(Lnet/minecraft/class_243;F)Lnet/minecraft/class_243;"
+    },
+    "com/beash/atmospherics/mixin/DimensionEffectsSunriseMixin": {
+      "getSunriseColor(FF)[F": "Lnet/minecraft/class_5294;method_28109(FF)[F"
+    },
+    "com/beash/atmospherics/mixin/FogConfigScreenCloudSupportMixin": {
+      "init": "Lcom/beash/atmospherics/screen/FogConfigScreen;method_25426()V"
+    },
+    "com/beash/atmospherics/mixin/LightningEntityRendererMixin": {
+      "render": "Lnet/minecraft/class_919;method_4034(Lnet/minecraft/class_1538;FFLnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V"
+    },
+    "com/beash/atmospherics/mixin/WeatherSoundMixin": {
+      "Lnet/minecraft/client/renderer/LevelRenderer;rainSoundTime:I": "Lnet/minecraft/class_761;field_20793:I",
+      "tickRain": "Lnet/minecraft/class_761;method_22713(Lnet/minecraft/class_4184;)V"
+    },
+    "com/beash/atmospherics/mixin/WorldRendererCloudMixin": {
+      "Lcom/mojang/blaze3d/vertex/VertexConsumer;setColor(FFFF)Lcom/mojang/blaze3d/vertex/VertexConsumer;": "Lnet/minecraft/class_4588;method_22915(FFFF)Lnet/minecraft/class_4588;",
+      "Lnet/minecraft/client/multiplayer/ClientLevel;getCloudColor(F)Lnet/minecraft/world/phys/Vec3;": "Lnet/minecraft/class_638;method_23785(F)Lnet/minecraft/class_243;",
+      "Lnet/minecraft/client/renderer/DimensionSpecialEffects;getCloudHeight()F": "Lnet/minecraft/class_5294;method_28108()F",
+      "buildClouds": "Lnet/minecraft/class_761;method_3239(Lnet/minecraft/class_289;DDDLnet/minecraft/class_243;)Lnet/minecraft/class_9801;",
+      "renderClouds": "Lnet/minecraft/class_761;method_3259(Lnet/minecraft/class_4587;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;FDDD)V",
+      "renderClouds(Lcom/mojang/blaze3d/vertex/PoseStack;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;FDDD)V": "Lnet/minecraft/class_761;method_3259(Lnet/minecraft/class_4587;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;FDDD)V"
+    },
+    "com/beash/atmospherics/mixin/WorldRendererSkyMixin": {
+      "drawStars": "Lnet/minecraft/class_761;method_3255(Lnet/minecraft/class_289;)Lnet/minecraft/class_9801;",
+      "renderSky": "Lnet/minecraft/class_761;method_3257(Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;FLnet/minecraft/class_4184;ZLjava/lang/Runnable;)V"
+    }
+  },
+  "data": {
+    "named:intermediary": {
+      "com/beash/atmospherics/mixin/AmbientFlowMixin": {
+        "Lnet/minecraft/world/level/block/Block;animateTick(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/util/RandomSource;)V": "Lnet/minecraft/class_2248;method_9496(Lnet/minecraft/class_2680;Lnet/minecraft/class_1937;Lnet/minecraft/class_2338;Lnet/minecraft/class_5819;)V",
+        "doAnimateTick": "Lnet/minecraft/class_638;method_2943(IIIILnet/minecraft/class_5819;Lnet/minecraft/class_2248;Lnet/minecraft/class_2338$class_2339;)V",
+        "getSkyFlashTime": "Lnet/minecraft/class_638;method_23789()I",
+        "playLocalSound(DDDLnet/minecraft/sounds/SoundEvent;Lnet/minecraft/sounds/SoundSource;FFZ)V": "Lnet/minecraft/class_638;method_8486(DDDLnet/minecraft/class_3414;Lnet/minecraft/class_3419;FFZ)V",
+        "setSkyFlashTime": "Lnet/minecraft/class_638;method_8509(I)V"
+      },
+      "com/beash/atmospherics/mixin/BackgroundRendererMixin": {
+        "setupColor": "Lnet/minecraft/class_758;method_3210(Lnet/minecraft/class_4184;FLnet/minecraft/class_638;IF)V",
+        "setupFog": "Lnet/minecraft/class_758;method_3211(Lnet/minecraft/class_4184;Lnet/minecraft/class_758$class_4596;FZF)V"
+      },
+      "com/beash/atmospherics/mixin/ClientWorldSkyColorMixin": {
+        "getSkyColor": "Lnet/minecraft/class_638;method_23777(Lnet/minecraft/class_243;F)Lnet/minecraft/class_243;"
+      },
+      "com/beash/atmospherics/mixin/DimensionEffectsSunriseMixin": {
+        "getSunriseColor(FF)[F": "Lnet/minecraft/class_5294;method_28109(FF)[F"
+      },
+      "com/beash/atmospherics/mixin/FogConfigScreenCloudSupportMixin": {
+        "init": "Lcom/beash/atmospherics/screen/FogConfigScreen;method_25426()V"
+      },
+      "com/beash/atmospherics/mixin/LightningEntityRendererMixin": {
+        "render": "Lnet/minecraft/class_919;method_4034(Lnet/minecraft/class_1538;FFLnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V"
+      },
+      "com/beash/atmospherics/mixin/WeatherSoundMixin": {
+        "Lnet/minecraft/client/renderer/LevelRenderer;rainSoundTime:I": "Lnet/minecraft/class_761;field_20793:I",
+        "tickRain": "Lnet/minecraft/class_761;method_22713(Lnet/minecraft/class_4184;)V"
+      },
+      "com/beash/atmospherics/mixin/WorldRendererCloudMixin": {
+        "Lcom/mojang/blaze3d/vertex/VertexConsumer;setColor(FFFF)Lcom/mojang/blaze3d/vertex/VertexConsumer;": "Lnet/minecraft/class_4588;method_22915(FFFF)Lnet/minecraft/class_4588;",
+        "Lnet/minecraft/client/multiplayer/ClientLevel;getCloudColor(F)Lnet/minecraft/world/phys/Vec3;": "Lnet/minecraft/class_638;method_23785(F)Lnet/minecraft/class_243;",
+        "Lnet/minecraft/client/renderer/DimensionSpecialEffects;getCloudHeight()F": "Lnet/minecraft/class_5294;method_28108()F",
+        "buildClouds": "Lnet/minecraft/class_761;method_3239(Lnet/minecraft/class_289;DDDLnet/minecraft/class_243;)Lnet/minecraft/class_9801;",
+        "renderClouds": "Lnet/minecraft/class_761;method_3259(Lnet/minecraft/class_4587;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;FDDD)V",
+        "renderClouds(Lcom/mojang/blaze3d/vertex/PoseStack;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;FDDD)V": "Lnet/minecraft/class_761;method_3259(Lnet/minecraft/class_4587;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;FDDD)V"
+      },
+      "com/beash/atmospherics/mixin/WorldRendererSkyMixin": {
+        "drawStars": "Lnet/minecraft/class_761;method_3255(Lnet/minecraft/class_289;)Lnet/minecraft/class_9801;",
+        "renderSky": "Lnet/minecraft/class_761;method_3257(Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;FLnet/minecraft/class_4184;ZLjava/lang/Runnable;)V"
+      }
+    }
+  }
+}
