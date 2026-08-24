@@ -1,0 +1,22 @@
+Atmospherics 2.6.5 Fabric 1.21.1 port validation
+=================================================
+
+Result: PASS
+File: atmospherics-2.6.5-fabric-1.21.1.jar
+Size: 3533393 bytes
+SHA-256: 08d6d5067fe80b713d15940142c6203b3cbf8de28367b9b243c3b79357fb2cbb
+Minecraft: 1.21.1
+Fabric Loader: 0.19.3 or newer
+Fabric API used for build: 0.116.7+1.21.1
+Java: 21
+Class files: 238
+
+Checks passed:
+- Valid ZIP/JAR with no duplicate members
+- Fabric metadata and client entrypoint present
+- Original Atmospherics classes and resources included
+- Compatibility bridge/shim classes included
+- NeoForge loader metadata removed
+- Duplicate mixin declaration removed
+- Mixin compatibility raised to Java 21
+- Production namespace remap task completed

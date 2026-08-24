@@ -1,0 +1,19 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.beash.atmospherics.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "AmbientFlowMixin",
+    "LightningEntityRendererMixin",
+    "ClientWorldSkyColorMixin",
+    "DimensionEffectsSunriseMixin",
+    "BackgroundRendererMixin",
+    "WeatherSoundMixin",
+    "WorldRendererSkyMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "refmap": "atmospherics.refmap.json"
+}

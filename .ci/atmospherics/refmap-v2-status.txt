@@ -1,3 +1,3 @@
-running
+success
 run=32698022280
 commit=ab7168c0677e59f753962315641e1931fd122dd2
