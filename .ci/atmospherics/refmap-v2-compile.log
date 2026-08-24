@@ -32,7 +32,7 @@ Patched private SpriteParticleRegistration ABI in /home/runner/work/mod-sample/m
 > Task :jar
 > Task :processIncludeJars
 > Task :remapJar
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_3-1787557972740.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_3-1787558879499.json
 
-BUILD SUCCESSFUL in 1m 5s
+BUILD SUCCESSFUL in 54s
 6 actionable tasks: 6 executed
